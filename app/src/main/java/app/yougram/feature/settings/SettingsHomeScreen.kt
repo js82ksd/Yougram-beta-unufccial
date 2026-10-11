@@ -133,6 +133,7 @@ import kotlinx.coroutines.launch
 /** Страницы вкладки «Настройки»; [title] показывается в верхней панели подэкрана. */
 enum class SettingsPage(val title: String) {
     Home("Настройки"),
+    HomeLayoutEditor("Порядок вкладок"),
     Appearance("Внешний вид"),
     Account("Аккаунт"),
     ChatSettings("Настройки чатов"),
@@ -270,119 +271,25 @@ fun SettingsHomeScreen(
             }
         }
 
-        val all = listOf(
-            HomeEntry("appearance", "Настройки Yougram", "Тема, цвета, панели", Icons.Filled.Tune, null, SettingsPage.Appearance),
-            HomeEntry("extras", "Призрак, шпион, фильтры", "Скрытность и локальный архив", Icons.Filled.VisibilityOff, null, SettingsPage.Extras),
-            HomeEntry("plugins", "Плагины", "Плагины на C++", Icons.Filled.Extension, null, SettingsPage.Plugins),
-            HomeEntry("power", "Энергосбережение", "Экономия заряда", Icons.Filled.BatterySaver, null, SettingsPage.PowerSaving),
-            HomeEntry("account", "Аккаунт", "Номер телефона, имя пользователя", Icons.Filled.Person, null, SettingsPage.Account),
-            HomeEntry("privacy", "Конфиденциальность", "Кто видит ваши данные", Icons.Filled.VpnKey, null, SettingsPage.Privacy),
-            HomeEntry("security", "Безопасность", "Пин-код, графический ключ, отпечаток", Icons.Filled.Lock, null, SettingsPage.Security),
-            HomeEntry("devices", "Устройства", "Активные сеансы", Icons.Filled.Laptop, state.devices?.toString(), SettingsPage.Devices),
-            HomeEntry("createGroup", "Создать группу", "Новая группа с участниками", Icons.Filled.Group, null, SettingsPage.CreateGroup),
-            HomeEntry("createChannel", "Создать канал", "Публичный или приватный", Icons.Filled.Campaign, null, SettingsPage.CreateChannel),
-            HomeEntry("chatSettings", "Настройки чатов", "Размер текста, анимации", Icons.Filled.ChatBubble, null, SettingsPage.ChatSettings),
-            HomeEntry("folders", "Папки с чатами", "Сортировка чатов по папкам", Icons.Filled.Folder, null, SettingsPage.Folders),
-            HomeEntry("archive", "Архив", "Архивные чаты", Icons.Filled.Archive, null, SettingsPage.Archive),
-            HomeEntry("notifications", "Уведомления", "Звуки, сигналы, бейджи", Icons.Filled.Notifications, null, SettingsPage.Notifications),
-            HomeEntry("data", "Данные и память", "Кэш, автозагрузка медиа", Icons.Filled.PieChart, null, SettingsPage.DataStorage),
-            HomeEntry("language", "Язык", null, Icons.Filled.Language, language, SettingsPage.Language),
-            HomeEntry("telegram", "Telegram", "Premium, Звёзды, Бизнес, подарки, помощь", Icons.Filled.Star, null, SettingsPage.TelegramHub),
-        )
+        val all = homeEntries(state.devices?.toString(), language)
         val byId = all.associateBy { it.id }
         val savedLayout by settings.homeLayout.collectAsState()
         val layout = remember(savedLayout) { HomeLayout.normalize(HomeLayout.parse(savedLayout), all.map { it.id }) }
-        val save = { l: List<HomeSection> -> settings.setHomeLayout(HomeLayout.toJson(l)) }
-        var editing by remember { mutableStateOf(false) }
-        var renaming by remember { mutableStateOf<Int?>(null) }
 
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-            TextButton(onClick = { editing = !editing }) { Text(if (editing) "Готово" else "Изменить порядок") }
+            TextButton(onClick = { onNavigate(SettingsPage.HomeLayoutEditor) }) { Text("Изменить порядок") }
         }
 
-        layout.forEachIndexed { si, section ->
-            if (editing) {
-                Row(Modifier.fillMaxWidth().padding(start = 16.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        section.title,
-                        modifier = Modifier.weight(1f),
-                        style = MaterialTheme.typography.titleSmall,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-                    IconButton(onClick = { renaming = si }) { Icon(Icons.Filled.Edit, "Переименовать") }
-                    IconButton(onClick = { save(HomeLayout.moveSection(layout, si, -1)) }, enabled = si > 0) {
-                        Icon(Icons.Filled.KeyboardArrowUp, "Категория выше")
-                    }
-                    IconButton(onClick = { save(HomeLayout.moveSection(layout, si, 1)) }, enabled = si < layout.lastIndex) {
-                        Icon(Icons.Filled.KeyboardArrowDown, "Категория ниже")
-                    }
-                    IconButton(onClick = { save(HomeLayout.deleteSection(layout, si)) }, enabled = layout.size > 1) {
-                        Icon(Icons.Filled.Delete, "Удалить категорию")
-                    }
-                }
-            } else if (section.entries.isNotEmpty()) {
+        layout.forEach { section ->
+            if (section.entries.isNotEmpty()) {
                 SectionLabel(section.title)
-            }
-            if (section.entries.isEmpty()) {
-                if (editing) {
-                    Text(
-                        "Пусто: переместите сюда вкладки стрелками",
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            } else {
                 SettingGroup {
-                    section.entries.forEachIndexed { ei, id ->
-                        val e = byId[id] ?: return@forEachIndexed
-                        item {
-                            if (editing) {
-                                SettingRow(
-                                    e.title, subtitle = e.subtitle, icon = e.icon,
-                                    trailing = {
-                                        Row {
-                                            IconButton(
-                                                onClick = { save(HomeLayout.moveEntry(layout, si, ei, -1)) },
-                                                enabled = si > 0 || ei > 0,
-                                            ) { Icon(Icons.Filled.KeyboardArrowUp, "Выше") }
-                                            IconButton(
-                                                onClick = { save(HomeLayout.moveEntry(layout, si, ei, 1)) },
-                                                enabled = si < layout.lastIndex || ei < section.entries.lastIndex,
-                                            ) { Icon(Icons.Filled.KeyboardArrowDown, "Ниже") }
-                                        }
-                                    },
-                                )
-                            } else {
-                                HomeEntryRow(e, onNavigate)
-                            }
-                        }
+                    section.entries.forEach { id ->
+                        val e = byId[id] ?: return@forEach
+                        item { HomeEntryRow(e, onNavigate) }
                     }
                 }
             }
-        }
-
-        if (editing) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                TextButton(onClick = { save(HomeLayout.addSection(layout)) }) { Text("Добавить категорию") }
-                TextButton(onClick = { settings.setHomeLayout(null) }) { Text("Сбросить") }
-            }
-        }
-
-        renaming?.let { idx ->
-            var text by remember(idx) { mutableStateOf(layout.getOrNull(idx)?.title.orEmpty()) }
-            AlertDialog(
-                onDismissRequest = { renaming = null },
-                title = { Text("Название категории") },
-                text = { OutlinedTextField(value = text, onValueChange = { text = it }, singleLine = true) },
-                confirmButton = {
-                    TextButton(onClick = {
-                        if (text.isNotBlank()) save(HomeLayout.rename(layout, idx, text.trim()))
-                        renaming = null
-                    }) { Text("Готово") }
-                },
-                dismissButton = { TextButton(onClick = { renaming = null }) { Text("Отмена") } },
-            )
         }
 
         Text(
@@ -399,13 +306,34 @@ fun SettingsHomeScreen(
     }
 }
 
-private class HomeEntry(
+internal class HomeEntry(
     val id: String,
     val title: String,
     val subtitle: String?,
     val icon: androidx.compose.ui.graphics.vector.ImageVector,
     val value: String?,
     val page: SettingsPage,
+)
+
+/** Все вкладки главного экрана настроек; [devices] и [language] — значения справа у «Устройства» и «Язык». */
+internal fun homeEntries(devices: String?, language: String?): List<HomeEntry> = listOf(
+            HomeEntry("appearance", "Настройки Yougram", "Тема, цвета, панели", Icons.Filled.Tune, null, SettingsPage.Appearance),
+            HomeEntry("extras", "Призрак, шпион, фильтры", "Скрытность и локальный архив", Icons.Filled.VisibilityOff, null, SettingsPage.Extras),
+            HomeEntry("plugins", "Плагины", "Плагины на C++", Icons.Filled.Extension, null, SettingsPage.Plugins),
+            HomeEntry("power", "Энергосбережение", "Экономия заряда", Icons.Filled.BatterySaver, null, SettingsPage.PowerSaving),
+            HomeEntry("account", "Аккаунт", "Номер телефона, имя пользователя", Icons.Filled.Person, null, SettingsPage.Account),
+            HomeEntry("privacy", "Конфиденциальность", "Кто видит ваши данные", Icons.Filled.VpnKey, null, SettingsPage.Privacy),
+            HomeEntry("security", "Безопасность", "Пин-код, графический ключ, отпечаток", Icons.Filled.Lock, null, SettingsPage.Security),
+            HomeEntry("devices", "Устройства", "Активные сеансы", Icons.Filled.Laptop, devices, SettingsPage.Devices),
+            HomeEntry("createGroup", "Создать группу", "Новая группа с участниками", Icons.Filled.Group, null, SettingsPage.CreateGroup),
+            HomeEntry("createChannel", "Создать канал", "Публичный или приватный", Icons.Filled.Campaign, null, SettingsPage.CreateChannel),
+            HomeEntry("chatSettings", "Настройки чатов", "Размер текста, анимации", Icons.Filled.ChatBubble, null, SettingsPage.ChatSettings),
+            HomeEntry("folders", "Папки с чатами", "Сортировка чатов по папкам", Icons.Filled.Folder, null, SettingsPage.Folders),
+            HomeEntry("archive", "Архив", "Архивные чаты", Icons.Filled.Archive, null, SettingsPage.Archive),
+            HomeEntry("notifications", "Уведомления", "Звуки, сигналы, бейджи", Icons.Filled.Notifications, null, SettingsPage.Notifications),
+            HomeEntry("data", "Данные и память", "Кэш, автозагрузка медиа", Icons.Filled.PieChart, null, SettingsPage.DataStorage),
+            HomeEntry("language", "Язык", null, Icons.Filled.Language, language, SettingsPage.Language),
+            HomeEntry("telegram", "Telegram", "Premium, Звёзды, Бизнес, подарки, помощь", Icons.Filled.Star, null, SettingsPage.TelegramHub),
 )
 
 @Composable

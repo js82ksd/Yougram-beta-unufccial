@@ -1,7 +1,9 @@
 ﻿import java.util.Properties
+import com.android.build.api.instrumentation.FramesComputationMode
+import com.android.build.api.instrumentation.InstrumentationScope
 
 plugins {
-    alias(libs.plugins.android.application)
+    id("com.android.application")
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
 }
@@ -10,6 +12,14 @@ val localProps = Properties().apply {
     val f = rootProject.file("local.properties")
     if (f.exists()) {
         f.inputStream().use { load(it) }
+    }
+}
+
+androidComponents {
+    onVariants { variant ->
+        // Правим байткод tdl-coroutines (см. buildSrc/TdJsonPatchFactory.kt и TdJsonFix.kt).
+        variant.instrumentation.transformClassesWith(TdJsonPatchFactory::class.java, InstrumentationScope.ALL) { }
+        variant.instrumentation.setAsmFramesComputationMode(FramesComputationMode.COPY_FRAMES)
     }
 }
 
@@ -22,8 +32,8 @@ android {
         minSdk = 31
         targetSdk = 36
 
-        versionCode = 25
-        versionName = "1.0.1"
+        versionCode = 27
+        versionName = "1.0.3"
 
         buildConfigField(
             "int",

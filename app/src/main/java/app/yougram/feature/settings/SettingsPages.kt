@@ -91,6 +91,7 @@ fun SettingsPageContent(
             contentPadding = contentPadding,
             onNavigate = onNavigate,
         )
+        SettingsPage.HomeLayoutEditor -> HomeLayoutEditorScreen(container.settings, contentPadding)
         SettingsPage.TelegramHub -> TelegramHubScreen(
             viewModel = viewModel<SettingsHomeViewModel>(factory = SettingsHomeViewModel.factory(container.chatRepository)),
             contentPadding = contentPadding,
