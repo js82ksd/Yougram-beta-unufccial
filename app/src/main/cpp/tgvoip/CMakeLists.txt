@@ -38,6 +38,12 @@ set_target_properties(tde2e PROPERTIES IMPORTED_LOCATION ${TGV_PREBUILT}/libtde2
 add_library(tdutils STATIC IMPORTED)
 set_target_properties(tdutils PROPERTIES IMPORTED_LOCATION ${TGV_PREBUILT}/libtdutils.a)
 
+# FFmpeg (prebuild): нужен tgcalls для H264-декодера, стриминга аудио/видео групповых звонков.
+foreach(ff avformat avcodec swresample swscale avutil)
+    add_library(ff_${ff} STATIC IMPORTED)
+    set_target_properties(ff_${ff} PROPERTIES IMPORTED_LOCATION ${TGV_PREBUILT}/lib${ff}.a)
+endforeach()
+
 # Определяет openh264, wasm, rnnoise, tgcalls_tp, tgcalls, voipandroid.
 include(${CMAKE_CURRENT_SOURCE_DIR}/voip/CMakeLists.txt)
 
@@ -46,6 +52,9 @@ target_link_options(yougram_voip PRIVATE
         -Wl,-z,max-page-size=16384 -Wl,-z,common-page-size=16384)
 target_link_libraries(yougram_voip
         -Wl,--whole-archive rnnoise openh264 voipandroid -Wl,--no-whole-archive
+        -Wl,--start-group
         webrtc_absl tgcalls wasm tgcalls_tp
+        ff_avformat ff_avcodec ff_swresample ff_swscale ff_avutil
         libvpx libdav1d libopus tde2e tdutils yuv ssl crypto
+        -Wl,--end-group
         jnigraphics log z GLESv2 EGL android OpenSLES)
