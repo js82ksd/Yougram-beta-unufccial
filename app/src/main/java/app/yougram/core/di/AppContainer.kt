@@ -9,9 +9,9 @@ import app.yougram.feature.account.data.AccountRepository
 import app.yougram.feature.auth.data.AuthRepository
 import app.yougram.feature.auth.data.AuthStep
 import app.yougram.feature.calls.data.CallAudio
+import app.yougram.feature.calls.data.TgCallsEngine
 import app.yougram.feature.calls.data.CallLog
 import app.yougram.feature.calls.data.CallManager
-import app.yougram.feature.calls.data.NTgCallsEngine
 import app.yougram.feature.chat.data.ChatRepository
 import app.yougram.feature.chat.data.SpyStore
 import app.yougram.feature.notifications.ConnectionService
@@ -60,7 +60,7 @@ class AppContainer(private val context: Context) {
     val callAudio = CallAudio(context.applicationContext)
     val notificationCenter = NotificationCenter(context.applicationContext, telegram, appScope, chatRepository, settings)
     val callManager = CallManager(telegram, appScope, chatRepository, context.applicationContext, callAudio)
-        .also { it.engine = NTgCallsEngine() }
+        .also { it.engine = TgCallsEngine(context.applicationContext) }
 
     /** Чат, который нужно открыть по тапу на уведомление; навигация сбрасывает значение после открытия. */
     val pendingOpenChat = MutableStateFlow<Long?>(null)

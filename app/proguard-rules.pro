@@ -2,10 +2,11 @@
 -keep class org.drinkless.tdlib.** { *; }
 -keep class dev.g000sha256.tdl.** { *; }
 
-# NTgCalls (звонки): нативный код вызывает Java-классы и колбэки по именам, без keep в release звонки не работают
--keep class io.github.pytgcalls.** { *; }
--keepclassmembers class io.github.pytgcalls.** { *; }
--dontwarn io.github.pytgcalls.**
+# tgcalls: C++ читает поля и вызывает методы по именам
+-keep class org.telegram.messenger.voip.** { *; }
+-keep class org.telegram.messenger.ApplicationLoader { *; }
+-keep class org.webrtc.** { *; }
+-dontwarn org.webrtc.**
 
 -keepclassmembers class * {
     native <methods>;

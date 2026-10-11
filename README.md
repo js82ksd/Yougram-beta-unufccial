@@ -183,7 +183,7 @@ Yougram содержит собственную интеграцию звонк�
 ```text
 data/CallManager.kt
 data/CallEngine.kt
-data/NTgCallsEngine.kt
+data/TgCallsEngine.kt
 data/CallAudio.kt
 data/CallService.kt
 data/CallLog.kt
@@ -207,7 +207,7 @@ data/CallLog.kt
 - запрос микрофона при необходимости;
 - история звонков.
 
-`NTgCallsEngine` используется как основной engine звонков.
+`TgCallsEngine` (родной tgcalls из Telegram) используется как основной engine звонков.
 
 ---
 
@@ -1313,5 +1313,4 @@ TDLib
 C++
 JNI
 CameraX
-NTgCalls
 ```

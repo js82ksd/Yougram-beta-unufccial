@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22.1)
-project(yougram_plugins CXX)
+project(yougram_plugins C CXX ASM)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -13,6 +13,14 @@ target_link_libraries(yougram_plugin_host log dl)
 add_library(yg_example_hello SHARED example_hello.cpp)
 target_include_directories(yg_example_hello PRIVATE include)
 target_link_libraries(yg_example_hello log)
+
+# Звонки: родной tgcalls. Исходники (voip/, third_party/, prebuild/) кладёт tools/setup_tgvoip.sh.
+# Без них сборка идёт как раньше, только без libyougram_voip.so.
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tgvoip/voip/CMakeLists.txt)
+    add_subdirectory(tgvoip)
+else()
+    message(WARNING "tgvoip/voip не найден: запусти tools/setup_tgvoip.sh, иначе звонки без звука")
+endif()
 
 # Весь нативный код написан без STL, поэтому libc++ не линкуем вообще.
 # Страницы по 16 КБ — для совместимости с новыми устройствами.

@@ -9,7 +9,6 @@ import dev.g000sha256.tdl.dto.CallServerTypeWebrtc
 import dev.g000sha256.tdl.dto.CallStateReady
 import org.telegram.messenger.voip.Instance
 import org.telegram.messenger.voip.NativeInstance
-import org.webrtc.ContextUtils
 import java.io.File
 import java.util.concurrent.Executors
 
@@ -91,7 +90,7 @@ class TgCallsEngine(context: Context) : CallEngine {
         onLink: (EngineLink) -> Unit,
     ) {
         try {
-            ContextUtils.initialize(app)
+            initWebrtcContext()
 
             val reflectorIds = state.servers
                 .filter { it.type is CallServerTypeTelegramReflector }
@@ -197,6 +196,13 @@ class TgCallsEngine(context: Context) : CallEngine {
         muted = false
         synchronized(earlyLock) { early.clear() }
         if (s != null) worker.execute { s.release() }
+    }
+
+    /** org.webrtc.ContextUtils приходит вместе с нативной сборкой tgcalls; через рефлексию проект собирается и без неё. */
+    private fun initWebrtcContext() {
+        Class.forName("org.webrtc.ContextUtils")
+            .getMethod("initialize", Context::class.java)
+            .invoke(null, app)
     }
 
     private fun networkType(): Int {
