@@ -48,6 +48,10 @@ import androidx.compose.material3.toShape
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import app.yougram.core.settings.DraftStore
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
@@ -296,6 +300,10 @@ private fun ChatRow(
     else MaterialTheme.colorScheme.onSurfaceVariant
     // У каждого чата своя случайная форма аватарки; выбранный чат становится скруглённым квадратом с галочкой.
     val avatarShape = if (selected) RoundedCornerShape(14.dp) else CircleShape
+    // Черновик основного чата показываем вместо последнего сообщения, как в Telegram.
+    val draftContext = LocalContext.current
+    val draftRev by DraftStore.changes.collectAsState()
+    val draft = remember(chat.id, draftRev) { DraftStore.get(draftContext, chat.id, 0, 0L).trim().replace('\n', ' ') }
     Row(
         modifier.fillMaxWidth().padding(horizontal = horizontalPadding, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -366,8 +374,12 @@ private fun ChatRow(
                 }
             }
             Row(verticalAlignment = Alignment.Top) {
+                val previewText = if (draft.isNotEmpty()) buildAnnotatedString {
+                    withStyle(SpanStyle(color = MaterialTheme.colorScheme.error)) { append("Черновик: ") }
+                    append(draft)
+                } else androidx.compose.ui.text.AnnotatedString(chat.lastMessage)
                 Text(
-                    chat.lastMessage,
+                    previewText,
                     style = MaterialTheme.typography.bodyMedium,
                     color = secondary,
                     maxLines = if (lines >= 3) 2 else 1,

@@ -54,6 +54,7 @@ import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.ChatBubble
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Inbox
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.NotificationsOff
@@ -142,6 +143,7 @@ fun ProfileScreen(
     var tab by remember { mutableStateOf(ProfileTab.MEDIA) }
     var confirmLeave by remember { mutableStateOf(false) }
     var showDossier by remember { mutableStateOf(false) }
+    var showEdit by remember { mutableStateOf(false) }
     var photoViewer by remember { mutableStateOf<MediaItem?>(null) }
     var videoViewer by remember { mutableStateOf<MediaItem?>(null) }
     var pendingVideo by remember { mutableStateOf(false) }
@@ -208,7 +210,7 @@ fun ProfileScreen(
         if (details == null) {
             if (state.loading) LoadingIndicator(Modifier.align(Alignment.Center))
         } else {
-            val actions = actionsFor(details, context, onOpenChat, startCall, viewModel::toggleMute) { confirmLeave = true }
+            val actions = actionsFor(details, context, onOpenChat, startCall, viewModel::toggleMute, { showEdit = true }) { confirmLeave = true }
             val media = remember(state.shared) { state.shared.filter { it.media?.kind in MediaKinds } }
             val files = remember(state.shared) { state.shared.filter { it.media?.kind == MediaKind.DOCUMENT } }
             val links = remember(state.shared) { state.shared.filter { UrlRegex.containsMatchIn(it.text) } }
@@ -279,6 +281,10 @@ fun ProfileScreen(
         }
     }
 
+    if (showEdit) {
+        state.details?.let { EditChatDialog(it, viewModel) { showEdit = false } }
+    }
+
     if (showDossier) {
         DossierSheet(viewModel, onDismiss = { showDossier = false })
     }
@@ -315,8 +321,10 @@ private fun actionsFor(
     onOpenChat: () -> Unit,
     onCall: (Boolean) -> Unit,
     onToggleMute: () -> Unit,
+    onEdit: () -> Unit,
     onLeave: () -> Unit,
 ): List<ProfileAction> {
+    val edit = ProfileAction(Icons.Filled.Edit, "Изменить", onEdit)
     val dial = {
         val phone = details.phone
         if (phone == null) {
@@ -352,13 +360,13 @@ private fun actionsFor(
         ProfileKind.GROUP -> listOf(
             ProfileAction(Icons.Filled.ChatBubble, "Чат", onOpenChat),
             sound,
-            ProfileAction(Icons.AutoMirrored.Filled.ExitToApp, "Покинуть", onLeave),
-        )
+        ) + (if (details.canEdit) listOf(edit) else emptyList()) +
+            ProfileAction(Icons.AutoMirrored.Filled.ExitToApp, "Покинуть", onLeave)
         ProfileKind.CHANNEL -> listOf(
             sound,
             ProfileAction(Icons.Filled.Share, "Ссылка", share),
-            ProfileAction(Icons.AutoMirrored.Filled.ExitToApp, "Покинуть", onLeave),
-        )
+        ) + (if (details.canEdit) listOf(edit) else emptyList()) +
+            ProfileAction(Icons.AutoMirrored.Filled.ExitToApp, "Покинуть", onLeave)
         ProfileKind.OTHER -> listOf(ProfileAction(Icons.Filled.ChatBubble, "Чат", onOpenChat))
     }
 }

@@ -220,14 +220,17 @@ fun YougramNavHost(container: AppContainer) {
         )
     }
 
-    // Тап по @username: ищем в Telegram и открываем профиль (в планшетном режиме — в правой панели).
+    // Тап по @username: ищем в Telegram. Пользователь или бот — профиль (в планшетном режиме в правой панели),
+    // публичный канал или группа (id отрицательный) — сразу сам чат, как в обычном Telegram.
     val detailNow = rememberUpdatedState(detail)
-    val openUsername: (String) -> Unit = remember(navController, context) {
+    val openUsername: (String) -> Unit = remember(navController, context, openChat) {
         { username: String ->
             scope.launch {
                 val id = runCatching { container.chatRepository.resolveUsername(username) }.getOrNull()
                 if (id == null) {
                     Toast.makeText(context, "@$username не найден", Toast.LENGTH_SHORT).show()
+                } else if (id < 0) {
+                    openChat(id, 0L)
                 } else if (twoPaneNow.value) {
                     setDetail(detailNow.value + DetailRoute.Profile(id))
                 } else {

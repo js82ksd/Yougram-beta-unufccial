@@ -32,8 +32,8 @@ android {
         minSdk = 31
         targetSdk = 36
 
-        versionCode = 29
-        versionName = "1.1.1"
+        versionCode = 30
+        versionName = "1.1.2"
 
         buildConfigField(
             "int",
@@ -138,9 +138,7 @@ dependencies {
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material.icons.extended)
 
-    // Material 3 Expressive (MotionScheme, MaterialShapes, *Emphasized, ToggleButton, ButtonGroup...)
-    // в стабильной 1.4.0 объявлен internal, публичен только в 1.5.0-alpha*. Берём alpha12 (Compose 1.10, compileSdk 36, AGP 8.13); более новые alpha требуют AGP 9.1 и compileSdk 37.
-    implementation("androidx.compose.material3:material3:1.5.0-alpha12")
+    implementation(libs.androidx.compose.material3)
 
     debugImplementation(libs.androidx.compose.ui.tooling)
 

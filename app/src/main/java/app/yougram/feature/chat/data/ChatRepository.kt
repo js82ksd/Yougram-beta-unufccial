@@ -4,6 +4,7 @@ import android.content.Context
 import app.yougram.core.di.AppContainer
 import app.yougram.core.settings.SettingsRepository
 import app.yougram.core.ui.component.CustomEmojiSpan
+import app.yougram.core.ui.component.LinkSpan
 import app.yougram.core.settings.SpyPrefs
 import app.yougram.core.telegram.TelegramClient
 import app.yougram.core.telegram.TelegramException
@@ -28,6 +29,7 @@ import dev.g000sha256.tdl.dto.ChatMemberStatusLeft
 import dev.g000sha256.tdl.dto.ChatMemberStatusMember
 import dev.g000sha256.tdl.dto.ChatMemberStatusRestricted
 import dev.g000sha256.tdl.dto.ChatNotificationSettings
+import dev.g000sha256.tdl.dto.ChatPermissions
 import dev.g000sha256.tdl.dto.ChatTypeBasicGroup
 import dev.g000sha256.tdl.dto.ChatTypePrivate
 import dev.g000sha256.tdl.dto.ChatTypeSecret
@@ -82,6 +84,11 @@ import dev.g000sha256.tdl.dto.MessageSenderUser
 import dev.g000sha256.tdl.dto.MessageSticker
 import dev.g000sha256.tdl.dto.MessageText
 import dev.g000sha256.tdl.dto.TextEntityTypeCustomEmoji
+import dev.g000sha256.tdl.dto.TextEntityTypeTextUrl
+import dev.g000sha256.tdl.dto.MessageOriginChannel
+import dev.g000sha256.tdl.dto.MessageOriginChat
+import dev.g000sha256.tdl.dto.MessageOriginHiddenUser
+import dev.g000sha256.tdl.dto.MessageOriginUser
 import dev.g000sha256.tdl.dto.MessageTopic
 import dev.g000sha256.tdl.dto.MessageTopicForum
 import dev.g000sha256.tdl.dto.MessageTopicThread
@@ -294,6 +301,12 @@ data class FileState(
 /** Ссылка на сообщение, на которое отвечают. */
 data class ReplyRef(val chatId: Long, val messageId: Long)
 
+/**
+ * Откуда переслано сообщение. [key] — id пользователя (>0) или чата/канала (<0), как у [SenderInfo.key];
+ * у скрытых отправителей id нет, есть только [hiddenName]. [signature] — подпись автора поста в канале.
+ */
+data class ForwardRef(val key: Long? = null, val hiddenName: String = "", val signature: String = "")
+
 /** Превью оригинала для цитаты в пузыре. */
 data class ReplyPreview(val author: String, val text: String)
 
@@ -380,6 +393,10 @@ data class MessageItem(
     val isService: Boolean = false,
     /** Опрос, если сообщение — опрос. */
     val poll: PollItem? = null,
+    /** Источник пересылки; null — сообщение не пересланное. */
+    val forward: ForwardRef? = null,
+    /** Ссылки, спрятанные за словами текста («нажмите здесь»), с позициями в [text]. */
+    val links: List<LinkSpan> = emptyList(),
 ) {
     /** Ключ автора: id пользователя (>0) или id чата (<0). */
     val senderKey: Long? get() = senderUserId ?: senderChatId
@@ -425,6 +442,18 @@ data class ProfileDetails(
     val canEdit: Boolean = false,
     /** Можно менять публичный адрес (создатель супергруппы или канала). */
     val canSetUsername: Boolean = false,
+    val isCreator: Boolean = false,
+)
+
+/** Права участников группы по умолчанию. */
+data class GroupPerms(
+    val sendMessages: Boolean,
+    val sendPolls: Boolean,
+    val sendOther: Boolean,
+    val linkPreviews: Boolean,
+    val inviteUsers: Boolean,
+    val pinMessages: Boolean,
+    val changeInfo: Boolean,
 )
 
 /** Досье на пользователя: только то, что Telegram и так отдаёт клиенту о собеседнике. */
@@ -500,6 +529,9 @@ data class ContentEvent(
     val oldText: String?,
     val at: Int,
     val poll: PollItem? = null,
+    /** Позиции эмодзи и скрытых ссылок нового текста: после правки старые смещения уже не подходят. */
+    val emojis: List<CustomEmojiSpan> = emptyList(),
+    val links: List<LinkSpan> = emptyList(),
 )
 
 /** Собеседник прочитал исходящие сообщения до [lastMessageId] включительно. */
@@ -858,7 +890,11 @@ class ChatRepository(
                     spy.recordEdit(update.chatId, update.messageId, text, summary, at, settings.spyPrefs.value.saveEdits)
                 }
                 _contentUpdates.tryEmit(
-                    ContentEvent(update.chatId, update.messageId, text, media, summary, old, at, (content as? MessagePoll)?.poll?.toItem()),
+                    ContentEvent(
+                        update.chatId, update.messageId, text, media, summary, old, at,
+                        (content as? MessagePoll)?.poll?.toItem(),
+                        emojisOf(content), linksOf(content),
+                    ),
                 )
                 plugins?.events?.emit("message_edited", linkedMapOf(
                     "chat_id" to update.chatId,
@@ -1601,6 +1637,7 @@ class ChatRepository(
                     avatarFileId = big?.id,
                     canEdit = canEditInfo(group.status),
                     canSetUsername = group.status is ChatMemberStatusCreator,
+                    isCreator = group.status is ChatMemberStatusCreator,
                 )
             }
             is ChatTypeBasicGroup -> {
@@ -1619,6 +1656,7 @@ class ChatRepository(
                     id = chatId,
                     avatarFileId = big?.id,
                     canEdit = canEditInfo(group.status),
+                    isCreator = group.status is ChatMemberStatusCreator,
                 )
             }
             else -> ProfileDetails(
@@ -1642,6 +1680,54 @@ class ChatRepository(
         is ChatMemberStatusCreator -> true
         is ChatMemberStatusAdministrator -> status.rights.canChangeInfo
         else -> false
+    }
+
+    suspend fun loadGroupPerms(chatId: Long): GroupPerms {
+        val p = client.getChat(chatId = chatId).getOrThrow().permissions
+        return GroupPerms(
+            sendMessages = p.canSendBasicMessages,
+            sendPolls = p.canSendPolls,
+            sendOther = p.canSendOtherMessages,
+            linkPreviews = p.canAddLinkPreviews,
+            inviteUsers = p.canInviteUsers,
+            pinMessages = p.canPinMessages,
+            changeInfo = p.canChangeInfo,
+        )
+    }
+
+    suspend fun saveGroupPerms(chatId: Long, perms: GroupPerms) {
+        val old = client.getChat(chatId = chatId).getOrThrow().permissions
+        client.setChatPermissions(
+            chatId = chatId,
+            // У DTO TDLib нет copy(): собираем заново, остальные права берём из текущих.
+            permissions = ChatPermissions(
+                canSendBasicMessages = perms.sendMessages,
+                canSendAudios = old.canSendAudios,
+                canSendDocuments = old.canSendDocuments,
+                canSendPhotos = old.canSendPhotos,
+                canSendVideos = old.canSendVideos,
+                canSendVideoNotes = old.canSendVideoNotes,
+                canSendVoiceNotes = old.canSendVoiceNotes,
+                canSendPolls = perms.sendPolls,
+                canSendOtherMessages = perms.sendOther,
+                canAddLinkPreviews = perms.linkPreviews,
+                canChangeInfo = perms.changeInfo,
+                canInviteUsers = perms.inviteUsers,
+                canPinMessages = perms.pinMessages,
+                canCreateTopics = old.canCreateTopics,
+                canReactToMessages = old.canReactToMessages,
+                canEditTag = old.canEditTag,
+            ),
+        ).getOrThrow()
+    }
+
+    /** Сбрасывает основную пригласительную ссылку и возвращает новую (без https://). */
+    suspend fun revokeInviteLink(chatId: Long): String =
+        client.replacePrimaryChatInviteLink(chatId = chatId).getOrThrow().inviteLink.removePrefix("https://")
+
+    /** Удаляет группу или канал для всех (только создатель). */
+    suspend fun deleteChatForAll(chatId: Long) {
+        client.deleteChat(chatId = chatId).getOrThrow()
     }
 
     /** Проверяет адрес для уже существующего чата [chatId]. */
@@ -2508,6 +2594,16 @@ class ChatRepository(
             buttons = buttonsOf(this),
             isService = c::class.simpleName?.removePrefix("Message") in ServiceContentNames,
             poll = pollItem,
+            forward = forwardInfo?.origin?.let { origin ->
+                when (origin) {
+                    is MessageOriginUser -> ForwardRef(key = origin.senderUserId)
+                    is MessageOriginHiddenUser -> ForwardRef(hiddenName = origin.senderName)
+                    is MessageOriginChat -> ForwardRef(key = origin.senderChatId, signature = origin.authorSignature)
+                    is MessageOriginChannel -> ForwardRef(key = origin.chatId, signature = origin.authorSignature)
+                    else -> null
+                }
+            },
+            links = linksOf(c),
         )
     }
 
@@ -2579,19 +2675,30 @@ class ChatRepository(
             }
         }
 
+    /** Форматированный текст сообщения или подпись к медиа; null — у содержимого такого нет. */
+    private fun formattedOf(c: MessageContent): FormattedText? = when (c) {
+        is MessageText -> c.text
+        is MessagePhoto -> c.caption
+        is MessageVideo -> c.caption
+        is MessageAnimation -> c.caption
+        is MessageDocument -> c.caption
+        is MessageVoiceNote -> c.caption
+        else -> null
+    }
+
     /** Премиум-эмодзи из форматированного текста или подписи; обычный текст без сущностей даёт пустой список. */
     private fun emojisOf(c: MessageContent): List<CustomEmojiSpan> {
-        val formatted = when (c) {
-            is MessageText -> c.text
-            is MessagePhoto -> c.caption
-            is MessageVideo -> c.caption
-            is MessageAnimation -> c.caption
-            is MessageDocument -> c.caption
-            is MessageVoiceNote -> c.caption
-            else -> null
-        } ?: return emptyList()
+        val formatted = formattedOf(c) ?: return emptyList()
         return formatted.entities.orEmpty().filterNotNull().mapNotNull { e ->
             (e.type as? TextEntityTypeCustomEmoji)?.let { CustomEmojiSpan(e.offset, e.length, it.customEmojiId) }
+        }
+    }
+
+    /** Ссылки, спрятанные за текстом (TextUrl): без них «слово со ссылкой» было бы просто словом. */
+    private fun linksOf(c: MessageContent): List<LinkSpan> {
+        val formatted = formattedOf(c) ?: return emptyList()
+        return formatted.entities.orEmpty().filterNotNull().mapNotNull { e ->
+            (e.type as? TextEntityTypeTextUrl)?.let { LinkSpan(e.offset, e.length, it.url) }
         }
     }
 

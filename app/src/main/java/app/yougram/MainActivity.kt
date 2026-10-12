@@ -38,8 +38,7 @@ import app.yougram.navigation.YougramNavHost
 class MainActivity : ComponentActivity() {
     private val container by lazy { (application as YougramApp).container }
 
-    private val notificationPermission =
-        registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+    private lateinit var notificationPermission: androidx.activity.result.ActivityResultLauncher<String>
 
     /** Тап по уведомлению несёт id чата: передаём его навигации. */
     private fun handleIntent(intent: Intent?) {
@@ -65,6 +64,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        notificationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
         // Флаг защиты ставим до первого кадра, чтобы превью в «Недавних» не успело показать содержимое.
         applySecureFlag(container.appLock.settings.value.let { it.type != LockType.None && it.secureScreen })

@@ -102,6 +102,24 @@ enum class DistanceUnit(val label: String) {
     Miles("Мили"),
 }
 
+enum class VideoCameraChoice(val label: String) {
+    Main("Основная"),
+    Back("Задняя"),
+}
+
+/** Настройки камеры для видеосообщений. */
+data class CameraPrefs(
+    /** Мастер-переключатель расширенных настроек. */
+    val advanced: Boolean = true,
+    val videoCamera: VideoCameraChoice = VideoCameraChoice.Main,
+    val rememberLast: Boolean = true,
+    val zoomSlider: Boolean = true,
+    /** true — приближение не сбрасывается, когда отпускаешь слайдер. */
+    val staticZoom: Boolean = false,
+    /** Последняя использованная камера: true — фронтальная. */
+    val lastFront: Boolean = true,
+)
+
 /** Настройки чатов. */
 data class ChatPrefs(
     /** Размер текста сообщений, sp. */
@@ -541,6 +559,31 @@ class SettingsRepository(private val context: Context) {
         }
         _powerSaving.value = enabled
         prefs.edit().putBoolean(KEY_POWER, enabled).apply()
+    }
+
+    private val _camera = MutableStateFlow(
+        CameraPrefs(
+            advanced = prefs.getBoolean("cam_advanced", true),
+            videoCamera = VideoCameraChoice.entries.getOrElse(prefs.getInt("cam_video", 0)) { VideoCameraChoice.Main },
+            rememberLast = prefs.getBoolean("cam_remember", true),
+            zoomSlider = prefs.getBoolean("cam_zoom_slider", true),
+            staticZoom = prefs.getBoolean("cam_static_zoom", false),
+            lastFront = prefs.getBoolean("cam_last_front", true),
+        ),
+    )
+    val camera: StateFlow<CameraPrefs> = _camera.asStateFlow()
+
+    fun updateCamera(transform: (CameraPrefs) -> CameraPrefs) {
+        val c = transform(_camera.value)
+        _camera.value = c
+        prefs.edit()
+            .putBoolean("cam_advanced", c.advanced)
+            .putInt("cam_video", c.videoCamera.ordinal)
+            .putBoolean("cam_remember", c.rememberLast)
+            .putBoolean("cam_zoom_slider", c.zoomSlider)
+            .putBoolean("cam_static_zoom", c.staticZoom)
+            .putBoolean("cam_last_front", c.lastFront)
+            .apply()
     }
 
     // Режим призрака.

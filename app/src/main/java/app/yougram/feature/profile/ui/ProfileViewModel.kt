@@ -7,9 +7,11 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import app.yougram.feature.chat.data.ChatRepository
 import app.yougram.feature.chat.data.FileState
+import app.yougram.feature.chat.data.GroupPerms
 import app.yougram.feature.chat.data.MessageItem
 import app.yougram.feature.chat.data.ProfileDetails
 import app.yougram.feature.chat.data.UserDossier
+import app.yougram.feature.chat.data.UsernameCheck
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -37,6 +39,18 @@ class ProfileViewModel(
     val state: StateFlow<ProfileUiState> = _state.asStateFlow()
 
     init {
+        reload()
+        viewModelScope.launch {
+            val items = runCatching { repository.deletedMessages(chatId) }.getOrDefault(emptyList())
+            _state.update { it.copy(deleted = items) }
+        }
+        viewModelScope.launch {
+            val items = runCatching { repository.sharedMessages(chatId) }.getOrDefault(emptyList())
+            _state.update { it.copy(shared = items, sharedLoading = false) }
+        }
+    }
+
+    fun reload() {
         viewModelScope.launch {
             try {
                 val details = repository.loadProfileDetails(chatId)
@@ -45,13 +59,38 @@ class ProfileViewModel(
                 _state.update { it.copy(loading = false, error = e.message) }
             }
         }
+    }
+
+    suspend fun checkUsername(username: String): UsernameCheck =
+        runCatching { repository.checkChatUsernameFor(chatId, username) }.getOrDefault(UsernameCheck.Unavailable)
+
+    /** Сохраняет правки; возвращает предупреждения или бросает исключение. */
+    suspend fun saveEdit(
+        title: String?,
+        description: String?,
+        username: String?,
+        photoPath: String?,
+        removePhoto: Boolean,
+    ): List<String> {
+        val warnings = repository.editChat(chatId, title, description, username, photoPath, removePhoto)
+        reload()
+        return warnings
+    }
+
+    suspend fun loadPerms(): GroupPerms? = runCatching { repository.loadGroupPerms(chatId) }.getOrNull()
+
+    suspend fun savePerms(perms: GroupPerms) = repository.saveGroupPerms(chatId, perms)
+
+    suspend fun revokeLink(): String = repository.revokeInviteLink(chatId).also { reload() }
+
+    fun deleteChat() {
         viewModelScope.launch {
-            val items = runCatching { repository.deletedMessages(chatId) }.getOrDefault(emptyList())
-            _state.update { it.copy(deleted = items) }
-        }
-        viewModelScope.launch {
-            val items = runCatching { repository.sharedMessages(chatId) }.getOrDefault(emptyList())
-            _state.update { it.copy(shared = items, sharedLoading = false) }
+            try {
+                repository.deleteChatForAll(chatId)
+                _state.update { it.copy(left = true) }
+            } catch (e: Exception) {
+                _state.update { it.copy(error = e.message) }
+            }
         }
     }
 

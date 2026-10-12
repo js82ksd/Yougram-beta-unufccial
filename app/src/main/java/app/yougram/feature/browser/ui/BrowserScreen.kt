@@ -3,6 +3,7 @@
 package app.yougram.feature.browser.ui
 
 import android.annotation.SuppressLint
+import android.content.ActivityNotFoundException
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -29,11 +30,12 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -61,6 +63,7 @@ import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.toShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -69,27 +72,41 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import app.yougram.core.ui.component.LocalOpenLink
 import app.yougram.core.ui.component.httpsOnly
+import app.yougram.core.ui.component.isTelegramUrl
 import app.yougram.core.ui.component.openExternally
+import app.yougram.core.ui.glass.LocalGlass
+import app.yougram.core.ui.glass.backdropSource
+import app.yougram.core.ui.glass.glass
+import app.yougram.core.ui.glass.rememberBackdropState
 
 /**
- * Встроенный браузер на WebView. Разрешены только http(s) (http поднимается до https),
- * доступ к файлам, камере, микрофону и геолокации страницам закрыт, загрузки уходят во внешнее приложение.
+ * Встроенный браузер на WebView. Страница рисуется на весь экран, а верхняя и нижняя панели —
+ * стеклянные: под ними содержимое страницы размывается (как в списке чатов и в чате).
+ * Доступ к файлам, камере, микрофону и геолокации страницам закрыт, загрузки уходят во внешнее приложение.
+ * Ссылки Telegram (t.me, tg://) уходят в клиент, остальные схемы (tel, mailto, intent, market и т.п.) — системе.
  */
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun BrowserScreen(initialUrl: String, onClose: () -> Unit) {
     val context = LocalContext.current
+    val density = LocalDensity.current
     var url by rememberSaveable { mutableStateOf(initialUrl) }
     var title by remember { mutableStateOf("") }
     var progress by remember { mutableIntStateOf(0) }
@@ -97,6 +114,17 @@ fun BrowserScreen(initialUrl: String, onClose: () -> Unit) {
     var canForward by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var menu by remember { mutableStateOf(false) }
+
+    // Высоты панелей (px): страница получает такие же отступы сверху и снизу, чтобы её начало и конец не прятались под стеклом.
+    var topBarPx by remember { mutableIntStateOf(0) }
+    var bottomBarPx by remember { mutableIntStateOf(0) }
+    val topBarDp = with(density) { topBarPx.toDp() }
+    val bottomBarDp = with(density) { bottomBarPx.toDp() }
+    val insetTopState = rememberUpdatedState(topBarDp.value.toInt())
+    val insetBottomState = rememberUpdatedState(bottomBarDp.value.toInt())
+
+    // Ссылки Telegram внутри страницы открываем средствами приложения (разбор через TDLib), а не в самом WebView.
+    val openLinkInApp by rememberUpdatedState(LocalOpenLink.current)
 
     val web = remember {
         WebView(context).apply {
@@ -119,17 +147,29 @@ fun BrowserScreen(initialUrl: String, onClose: () -> Unit) {
             webViewClient = object : WebViewClient() {
                 override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                     val uri = request.url
-                    return when (uri.scheme?.lowercase()) {
-                        "https" -> false
-                        "http" -> {
-                            view.loadUrl(httpsOnly(uri.toString()))
+                    val raw = uri.toString()
+                    val scheme = uri.scheme?.lowercase().orEmpty()
+                    return when {
+                        // Ссылка в клиент Telegram: t.me/..., telegram.me/..., tg://...
+                        scheme == "tg" || ((scheme == "https" || scheme == "http") && isTelegramUrl(raw)) -> {
+                            openLinkInApp(raw)
                             true
                         }
-                        "tel", "mailto", "sms", "geo" -> {
-                            openExternally(context, uri.toString())
+                        scheme == "https" -> false
+                        scheme == "http" -> {
+                            view.loadUrl(httpsOnly(raw))
                             true
                         }
-                        else -> true // intent:, file:, javascript: и прочее не открываем
+                        scheme == "intent" -> {
+                            if (request.hasGesture()) openIntentUri(context, view, raw)
+                            true
+                        }
+                        scheme in BlockedSchemes || scheme.isEmpty() -> true
+                        // tel:, mailto:, sms:, geo:, market:, whatsapp: и прочие схемы приложений — системе, но только по тапу пользователя.
+                        else -> {
+                            if (request.hasGesture()) openExternally(context, raw)
+                            true
+                        }
                     }
                 }
 
@@ -140,10 +180,15 @@ fun BrowserScreen(initialUrl: String, onClose: () -> Unit) {
                     canForward = view.canGoForward()
                 }
 
+                override fun onPageCommitVisible(view: WebView, pageUrl: String?) {
+                    applyPageInsets(view, insetTopState.value, insetBottomState.value)
+                }
+
                 override fun onPageFinished(view: WebView, pageUrl: String?) {
                     if (pageUrl != null) url = pageUrl
                     canBack = view.canGoBack()
                     canForward = view.canGoForward()
+                    applyPageInsets(view, insetTopState.value, insetBottomState.value)
                 }
 
                 override fun onReceivedError(view: WebView, request: WebResourceRequest, err: WebResourceError) {
@@ -173,6 +218,8 @@ fun BrowserScreen(initialUrl: String, onClose: () -> Unit) {
     }
 
     LaunchedEffect(web) { web.loadUrl(httpsOnly(url)) }
+    // Панели поменяли размер (поворот, жесты навигации) — обновляем отступы уже открытой страницы.
+    LaunchedEffect(web, topBarPx, bottomBarPx) { applyPageInsets(web, insetTopState.value, insetBottomState.value) }
     DisposableEffect(web) {
         onDispose {
             web.stopLoading()
@@ -187,78 +234,22 @@ fun BrowserScreen(initialUrl: String, onClose: () -> Unit) {
     val loading = progress in 1..99
     val scheme = MaterialTheme.colorScheme
 
-    Surface(Modifier.fillMaxSize(), color = scheme.surface) {
-        Column(Modifier.fillMaxSize().navigationBarsPadding()) {
-            // Верхняя панель: контейнер с крупными нижними скруглениями; цвет доходит и под строку состояния.
-            Surface(
-                Modifier.fillMaxWidth(),
-                color = scheme.surfaceContainer,
-                shape = RoundedCornerShape(bottomStart = 28.dp, bottomEnd = 28.dp),
-            ) {
-                Row(
-                    Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 4.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    IconButton(onClick = onClose) { Icon(Icons.Filled.Close, contentDescription = "Закрыть") }
-                    Column(Modifier.weight(1f)) {
-                        Text(
-                            title.ifEmpty { host },
-                            style = MaterialTheme.typography.titleMediumEmphasized,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            if (secure) {
-                                Icon(
-                                    Icons.Filled.Lock,
-                                    contentDescription = "Защищённое соединение",
-                                    modifier = Modifier.size(12.dp).padding(end = 2.dp),
-                                    tint = scheme.onSurfaceVariant,
-                                )
-                            }
-                            Text(
-                                host,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = scheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                    }
-                    Box {
-                        IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, contentDescription = "Ещё") }
-                        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }, shape = MaterialTheme.shapes.large) {
-                            DropdownMenuItem(
-                                text = { Text("Открыть во внешнем браузере") },
-                                leadingIcon = { Icon(Icons.Filled.OpenInBrowser, null) },
-                                onClick = { menu = false; openExternally(context, url) },
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Скопировать ссылку") },
-                                leadingIcon = { Icon(Icons.Filled.ContentCopy, null) },
-                                onClick = { menu = false; copyLink(context, url) },
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Поделиться") },
-                                leadingIcon = { Icon(Icons.Filled.Share, null) },
-                                onClick = { menu = false; shareLink(context, url) },
-                            )
-                        }
-                    }
-                }
-            }
-            Box(Modifier.fillMaxWidth().heightIn(min = 6.dp)) {
-                if (loading) {
-                    LinearWavyProgressIndicator(progress = { progress / 100f }, modifier = Modifier.fillMaxWidth())
-                }
-            }
+    val backdrop = rememberBackdropState()
+    val glass = LocalGlass.current
+    val navInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
 
-            Box(Modifier.weight(1f).fillMaxWidth()) {
+    Surface(Modifier.fillMaxSize(), color = scheme.surface) {
+        Box(Modifier.fillMaxSize()) {
+            // Страница и экран ошибки — «источник» для размытия: именно их копия просвечивает под панелями.
+            Box(Modifier.fillMaxSize().backdropSource(backdrop)) {
                 AndroidView(factory = { web }, modifier = Modifier.fillMaxSize())
                 error?.let { message ->
                     Surface(Modifier.fillMaxSize(), color = scheme.surface) {
                         Column(
-                            Modifier.padding(32.dp),
+                            Modifier
+                                .fillMaxSize()
+                                .padding(top = topBarDp, bottom = bottomBarDp)
+                                .padding(32.dp),
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.Center,
                         ) {
@@ -281,40 +272,174 @@ fun BrowserScreen(initialUrl: String, onClose: () -> Unit) {
                                 modifier = Modifier.padding(top = 8.dp, bottom = 16.dp),
                             )
                             Button(onClick = { error = null; web.reload() }) { Text("Повторить") }
+                            // Сайт мог не открыться только во встроенном браузере (например, http без https) — даём запасной путь.
+                            TextButton(onClick = { openExternally(context, url) }) { Text("Открыть во внешнем браузере") }
                         }
                     }
                 }
             }
 
-            // Нижняя панель: плавающая «таблетка» с тональными кнопками.
-            Surface(
-                Modifier.padding(horizontal = 24.dp, vertical = 8.dp).fillMaxWidth(),
-                shape = MaterialTheme.shapes.extraLarge,
-                color = scheme.surfaceContainerHigh,
-            ) {
-                Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
-                    verticalAlignment = Alignment.CenterVertically,
+            // Верхняя панель: стеклянный контейнер с крупными нижними скруглениями; доходит и под строку состояния.
+            Column(Modifier.align(Alignment.TopCenter).fillMaxWidth()) {
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .onSizeChanged { topBarPx = it.height }
+                        .glass(
+                            backdrop,
+                            glass,
+                            RoundedCornerShape(bottomStart = 28.dp, bottomEnd = 28.dp),
+                            tint = scheme.surfaceContainer,
+                        ),
                 ) {
-                    FilledTonalIconButton(onClick = { web.goBack() }, enabled = canBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад")
+                    Row(
+                        Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 4.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        IconButton(onClick = onClose) { Icon(Icons.Filled.Close, contentDescription = "Закрыть") }
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                title.ifEmpty { host },
+                                style = MaterialTheme.typography.titleMediumEmphasized,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                if (secure) {
+                                    Icon(
+                                        Icons.Filled.Lock,
+                                        contentDescription = "Защищённое соединение",
+                                        modifier = Modifier.size(12.dp).padding(end = 2.dp),
+                                        tint = scheme.onSurfaceVariant,
+                                    )
+                                }
+                                Text(
+                                    host,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = scheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
+                        Box {
+                            IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, contentDescription = "Ещё") }
+                            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }, shape = MaterialTheme.shapes.large) {
+                                DropdownMenuItem(
+                                    text = { Text("Открыть во внешнем браузере") },
+                                    leadingIcon = { Icon(Icons.Filled.OpenInBrowser, null) },
+                                    onClick = { menu = false; openExternally(context, url) },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Скопировать ссылку") },
+                                    leadingIcon = { Icon(Icons.Filled.ContentCopy, null) },
+                                    onClick = { menu = false; copyLink(context, url) },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Поделиться") },
+                                    leadingIcon = { Icon(Icons.Filled.Share, null) },
+                                    onClick = { menu = false; shareLink(context, url) },
+                                )
+                            }
+                        }
                     }
-                    FilledTonalIconButton(onClick = { web.goForward() }, enabled = canForward) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = "Вперёд")
-                    }
-                    FilledTonalIconButton(onClick = { if (loading) web.stopLoading() else web.reload() }) {
-                        Icon(
-                            if (loading) Icons.Filled.Close else Icons.Filled.Refresh,
-                            contentDescription = if (loading) "Остановить" else "Обновить",
-                        )
-                    }
-                    FilledTonalIconButton(onClick = { shareLink(context, url) }) {
-                        Icon(Icons.Filled.Share, contentDescription = "Поделиться")
+                }
+                if (loading) {
+                    LinearWavyProgressIndicator(
+                        progress = { progress / 100f },
+                        modifier = Modifier.fillMaxWidth().padding(top = 2.dp),
+                    )
+                }
+            }
+
+            // Нижняя область: стекло под системной навигацией и поверх него плавающая «таблетка» с кнопками, тоже стеклянная.
+            Box(
+                Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .onSizeChanged { bottomBarPx = it.height },
+            ) {
+                Box(
+                    Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .height(navInset)
+                        .glass(backdrop, glass, RectangleShape),
+                )
+                Surface(
+                    Modifier
+                        .padding(start = 24.dp, end = 24.dp, top = 8.dp, bottom = navInset + 8.dp)
+                        .fillMaxWidth()
+                        .glass(backdrop, glass, MaterialTheme.shapes.extraLarge, tint = scheme.surfaceContainerHigh),
+                    shape = MaterialTheme.shapes.extraLarge,
+                    color = Color.Transparent,
+                ) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        FilledTonalIconButton(onClick = { web.goBack() }, enabled = canBack) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад")
+                        }
+                        FilledTonalIconButton(onClick = { web.goForward() }, enabled = canForward) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = "Вперёд")
+                        }
+                        FilledTonalIconButton(onClick = { if (loading) web.stopLoading() else web.reload() }) {
+                            Icon(
+                                if (loading) Icons.Filled.Close else Icons.Filled.Refresh,
+                                contentDescription = if (loading) "Остановить" else "Обновить",
+                            )
+                        }
+                        FilledTonalIconButton(onClick = { shareLink(context, url) }) {
+                            Icon(Icons.Filled.Share, contentDescription = "Поделиться")
+                        }
                     }
                 }
             }
         }
+    }
+}
+
+/** Схемы, которые страница не вправе открывать ни у нас, ни в других приложениях. */
+private val BlockedSchemes = setOf(
+    "file", "content", "javascript", "data", "blob", "about", "view-source", "filesystem", "chrome", "chrome-extension",
+)
+
+/**
+ * Страница сдвигает свой контент на высоту панелей: тогда начало и конец страницы видны целиком,
+ * а при прокрутке содержимое уходит под размытые панели. Единицы — CSS-пиксели (с поправкой на масштаб страницы).
+ */
+private fun applyPageInsets(view: WebView, topDp: Int, bottomDp: Int) {
+    if (topDp <= 0 && bottomDp <= 0) return
+    val js = """
+        (function() {
+            var k = (screen.width > 0 && window.innerWidth > 0) ? window.innerWidth / screen.width : 1;
+            var s = document.getElementById('yg-insets');
+            if (!s) {
+                s = document.createElement('style');
+                s.id = 'yg-insets';
+                (document.head || document.documentElement).appendChild(s);
+            }
+            s.textContent = 'html{box-sizing:border-box !important;padding-top:' + ($topDp * k) + 'px !important;padding-bottom:' + ($bottomDp * k) + 'px !important;}';
+        })();
+    """.trimIndent()
+    view.evaluateJavascript(js, null)
+}
+
+/** intent://... со страницы: открываем подходящее приложение, а если его нет — запасную https-ссылку из самой intent-ссылки. */
+private fun openIntentUri(context: Context, view: WebView, raw: String) {
+    val intent = runCatching { Intent.parseUri(raw, Intent.URI_INTENT_SCHEME) }.getOrNull() ?: return
+    // Страница не должна выбирать конкретный компонент или подставлять «селектор»: только обычное открытие по ссылке.
+    intent.addCategory(Intent.CATEGORY_BROWSABLE)
+    intent.component = null
+    intent.selector = null
+    val fallback = intent.getStringExtra("browser_fallback_url")
+    try {
+        context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    } catch (_: ActivityNotFoundException) {
+        if (fallback != null && fallback.startsWith("https://", ignoreCase = true)) view.loadUrl(fallback)
+        else Toast.makeText(context, "Нет приложения для открытия ссылки", Toast.LENGTH_SHORT).show()
     }
 }
 

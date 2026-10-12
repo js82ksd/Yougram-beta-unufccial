@@ -426,7 +426,7 @@ class ChatViewModel(
                 _state.update { s ->
                     s.copy(
                         messages = s.messages.map {
-                            if (it.id == event.messageId) it.copy(text = event.text, media = event.media ?: it.media, summary = event.summary, poll = event.poll ?: it.poll) else it
+                            if (it.id == event.messageId) it.copy(text = event.text, media = event.media ?: it.media, summary = event.summary, poll = event.poll ?: it.poll, emojis = event.emojis, links = event.links) else it
                         },
                         edits = if (event.oldText == null) s.edits else
                             s.edits + (event.messageId to (s.edits[event.messageId].orEmpty() + EditRecord(event.oldText, event.at))),

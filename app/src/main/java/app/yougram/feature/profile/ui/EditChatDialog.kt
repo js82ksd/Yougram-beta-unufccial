@@ -8,6 +8,9 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -27,7 +30,9 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialShapes
@@ -59,6 +64,8 @@ import app.yougram.core.ui.component.Avatar
 import app.yougram.core.ui.component.Button
 import app.yougram.core.ui.component.FileAvatar
 import app.yougram.core.ui.component.LoadingIndicator
+import app.yougram.core.ui.component.TextButton
+import app.yougram.feature.chat.data.GroupPerms
 import app.yougram.feature.chat.data.ProfileDetails
 import app.yougram.feature.chat.data.ProfileKind
 import app.yougram.feature.chat.data.UsernameCheck
@@ -107,6 +114,15 @@ fun EditChatDialog(
     var username by remember { mutableStateOf(originalUsername) }
     var usernameCheck by remember { mutableStateOf<UsernameCheck?>(null) }
 
+    var perms by remember { mutableStateOf<GroupPerms?>(null) }
+    var origPerms by remember { mutableStateOf<GroupPerms?>(null) }
+    var link by remember { mutableStateOf(details.link) }
+    var confirmDelete by remember { mutableStateOf(false) }
+    val isGroup = details.kind == ProfileKind.GROUP
+    LaunchedEffect(Unit) {
+        if (isGroup) viewModel.loadPerms()?.let { perms = it; origPerms = it }
+    }
+
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri != null) {
             val file = File(context.cacheDir, "chat_photo_${System.currentTimeMillis()}.jpg")
@@ -137,15 +153,32 @@ fun EditChatDialog(
     }
 
     val usernameOk = !details.canSetUsername || !isPublic || username == originalUsername ||
-        usernameCheck == UsernameCheck.Ok
-    val changed = title.trim() != details.title || description.trim() != details.description ||
-        photoPath != null || removePhoto || usernameChanged
+            usernameCheck == UsernameCheck.Ok
+    val permsChanged = perms != origPerms
+    val changed = permsChanged || title.trim() != details.title || description.trim() != details.description ||
+            photoPath != null || removePhoto || usernameChanged
     val canSave = title.isNotBlank() && !busy && changed && usernameOk &&
-        !(details.canSetUsername && isPublic && !usernameValid)
+            !(details.canSetUsername && isPublic && !usernameValid)
 
     val close = {
         photoPath?.let { File(it).delete() }
         onDismiss()
+    }
+
+    if (confirmDelete) {
+        AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            title = { Text(if (channel) "Удалить канал?" else "Удалить группу?") },
+            text = { Text("Чат и вся переписка будут удалены для всех участников. Это нельзя отменить.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmDelete = false
+                    viewModel.deleteChat()
+                    onDismiss()
+                }) { Text("Удалить", color = scheme.error) }
+            },
+            dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Отмена") } },
+        )
     }
 
     Dialog(
@@ -285,7 +318,7 @@ fun EditChatDialog(
                                 else -> "Этот адрес сейчас недоступен"
                             }
                             val bad = username.isNotEmpty() && username != originalUsername &&
-                                (!usernameValid || (usernameCheck != null && usernameCheck != UsernameCheck.Ok))
+                                    (!usernameValid || (usernameCheck != null && usernameCheck != UsernameCheck.Ok))
                             SettingGroup {
                                 item {
                                     TextField(
@@ -307,6 +340,55 @@ fun EditChatDialog(
                             }
                         }
                     }
+                    perms?.let { p ->
+                        SectionLabel("Что разрешено участникам")
+                        SettingGroup {
+                            item { PermRow("Отправлять сообщения", p.sendMessages) { perms = p.copy(sendMessages = it) } }
+                            item { PermRow("Отправлять опросы", p.sendPolls) { perms = p.copy(sendPolls = it) } }
+                            item { PermRow("Стикеры, GIF и боты", p.sendOther) { perms = p.copy(sendOther = it) } }
+                            item { PermRow("Превью ссылок", p.linkPreviews) { perms = p.copy(linkPreviews = it) } }
+                            item { PermRow("Добавлять участников", p.inviteUsers) { perms = p.copy(inviteUsers = it) } }
+                            item { PermRow("Закреплять сообщения", p.pinMessages) { perms = p.copy(pinMessages = it) } }
+                            item { PermRow("Менять информацию", p.changeInfo) { perms = p.copy(changeInfo = it) } }
+                        }
+                    }
+
+                    link?.let { l ->
+                        SectionLabel("Пригласительная ссылка")
+                        SettingGroup {
+                            item {
+                                Column(Modifier.fillMaxWidth().padding(16.dp)) {
+                                    Text("https://$l", style = MaterialTheme.typography.bodyLarge)
+                                    Row {
+                                        TextButton(onClick = {
+                                            val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                            cm.setPrimaryClip(ClipData.newPlainText("link", "https://$l"))
+                                            Toast.makeText(context, "Ссылка скопирована", Toast.LENGTH_SHORT).show()
+                                        }) { Text("Копировать") }
+                                        if (details.username == null) {
+                                            TextButton(onClick = {
+                                                scope.launch {
+                                                    runCatching { viewModel.revokeLink() }
+                                                        .onSuccess { link = it }
+                                                        .onFailure {
+                                                            Toast.makeText(context, "Не удалось обновить ссылку", Toast.LENGTH_SHORT).show()
+                                                        }
+                                                }
+                                            }) { Text("Сбросить") }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if (details.isCreator) {
+                        Spacer(Modifier.height(8.dp))
+                        TextButton(
+                            onClick = { confirmDelete = true },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text(if (channel) "Удалить канал" else "Удалить группу", color = scheme.error) }
+                    }
                     Spacer(Modifier.height(8.dp))
                 }
                 Button(
@@ -314,6 +396,12 @@ fun EditChatDialog(
                         busy = true
                         scope.launch {
                             try {
+                                val newPerms = perms
+                                if (permsChanged && newPerms != null) {
+                                    runCatching { viewModel.savePerms(newPerms) }.onFailure {
+                                        Toast.makeText(context, "Не удалось сохранить права", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
                                 val warnings = viewModel.saveEdit(
                                     title = title.trim().takeIf { it != details.title },
                                     description = description.trim().takeIf { it != details.description },
@@ -346,5 +434,16 @@ fun EditChatDialog(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun PermRow(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clickable { onChange(!checked) }.padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(label, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+        Switch(checked = checked, onCheckedChange = null)
     }
 }

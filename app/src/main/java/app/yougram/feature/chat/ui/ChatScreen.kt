@@ -18,6 +18,7 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FiniteAnimationSpec
+import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.keyframes
 import androidx.compose.animation.core.snap
@@ -33,6 +34,8 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -58,6 +61,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
@@ -78,6 +82,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Reply
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AddCircleOutline
 import androidx.compose.material.icons.filled.Call
@@ -114,6 +119,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -141,7 +147,10 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
@@ -156,6 +165,10 @@ import app.yougram.core.settings.GlassSettings
 import app.yougram.core.settings.SettingsRepository
 import app.yougram.core.ui.component.Avatar
 import app.yougram.core.ui.component.ChatWallpaper
+import app.yougram.core.ui.wallpaper.WallpaperBackground
+import app.yougram.core.ui.wallpaper.WallpaperDialog
+import app.yougram.core.ui.wallpaper.WallpaperKind
+import app.yougram.core.ui.wallpaper.WallpaperStore
 import app.yougram.core.ui.component.FileAvatar
 import app.yougram.core.ui.component.LocalOpenLink
 import app.yougram.core.ui.component.LocalOpenUsername
@@ -171,6 +184,7 @@ import app.yougram.feature.badge.ui.YougramBadge
 import app.yougram.feature.chat.comments.ui.CommentsButton
 import app.yougram.feature.chat.data.EditRecord
 import app.yougram.feature.chat.data.FileState
+import app.yougram.feature.chat.data.ForwardRef
 import app.yougram.feature.chat.data.MediaItem
 import app.yougram.feature.chat.data.MediaKind
 import app.yougram.feature.chat.data.MessageFilters
@@ -184,9 +198,11 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import kotlin.math.abs
+import kotlin.math.roundToInt
 import kotlin.reflect.KProperty
 import app.yougram.core.settings.DraftStore
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -238,6 +254,9 @@ fun ChatScreen(
     val filters by settings.filterPrefs.collectAsState()
     val powerSaving by settings.powerSaving.collectAsState()
     val appContext = LocalContext.current
+    val wallpaper by remember(appContext) { WallpaperStore.get(appContext).config }.collectAsState()
+    var wallpaperDialog by remember { mutableStateOf(false) }
+    if (wallpaperDialog) WallpaperDialog(onDismiss = { wallpaperDialog = false })
     val lowRam = remember(appContext) {
         app.yougram.core.ui.DeviceProfile.tier(appContext) == app.yougram.core.ui.DeviceTier.Low
     }
@@ -604,7 +623,8 @@ fun ChatScreen(
                     .then(if (bubbleBlurOn) Modifier.backdropSource(bubbleBackdrop) else Modifier)
                     .background(LocalChatBackground.current),
             ) {
-                if (chatPrefs.wallpaper != 0L) ChatWallpaper(chatPrefs.wallpaper, Modifier.fillMaxSize())
+                if (wallpaper.kind != WallpaperKind.None) WallpaperBackground(wallpaper, Modifier.fillMaxSize())
+                else if (chatPrefs.wallpaper != 0L) ChatWallpaper(chatPrefs.wallpaper, Modifier.fillMaxSize())
             }
             if (state.loading && state.messages.isEmpty()) {
                 LoadingIndicator(Modifier.align(Alignment.Center))
@@ -630,51 +650,60 @@ fun ChatScreen(
                         val older = visibleMessages.getOrNull(index + 1)
                         val joinedWithOlder = older != null && sameGroup(older, message)
                         val joinedWithNewer = newer != null && sameGroup(message, newer)
-                        MessageBubble(
-                            message = message,
-                            joinedWithOlder = joinedWithOlder,
-                            joinedWithNewer = joinedWithNewer,
-                            viewModel = viewModel,
-                            textSize = chatPrefs.textSize,
-                            cornerRadius = chatPrefs.bubbleRadius.dp,
-                            onOpenPhoto = { media -> viewerMedia = media },
-                            deleted = message.id in state.deletedIds,
-                            edits = state.edits[message.id].orEmpty(),
-                            readAt = state.readAt[message.id],
-                            onLongPress = {
-                                haptics(app.yougram.core.ui.Haptics.Kind.Heavy)
-                                actionMessage = message
+                        SwipeToReply(
+                            onThreshold = { haptics(app.yougram.core.ui.Haptics.Kind.Click) },
+                            onReply = {
+                                if (editing != null) stopEditing()
+                                replyTo = message
                             },
-                            onShowEdits = { editsDialog = state.edits[message.id] },
-                            groupChat = state.isGroup || state.isChannel,
-                            sender = message.senderKey?.let { senders[it] },
-                            onOpenSender = { message.senderKey?.let { key -> viewModel.openSender(key, onOpenProfile) } },
-                            reply = message.reply?.let { replies[it.messageId] },
-                            onReplyClick = {
-                                val target = message.reply?.messageId
-                                val idx = visibleMessages.indexOfFirst { it.id == target }
-                                scope.launch {
-                                    if (idx >= 0) {
-                                        listState.animateScrollToItem(idx)
-                                        highlightId = target
-                                        delay(1500)
-                                        if (!searchOpen && highlightId == target) highlightId = null
-                                    } else {
-                                        snackbar.showSnackbar("Исходное сообщение не загружено")
+                        ) {
+                            MessageBubble(
+                                message = message,
+                                joinedWithOlder = joinedWithOlder,
+                                joinedWithNewer = joinedWithNewer,
+                                viewModel = viewModel,
+                                textSize = chatPrefs.textSize,
+                                cornerRadius = chatPrefs.bubbleRadius.dp,
+                                onOpenPhoto = { media -> viewerMedia = media },
+                                deleted = message.id in state.deletedIds,
+                                edits = state.edits[message.id].orEmpty(),
+                                readAt = state.readAt[message.id],
+                                onLongPress = {
+                                    haptics(app.yougram.core.ui.Haptics.Kind.Heavy)
+                                    actionMessage = message
+                                },
+                                onShowEdits = { editsDialog = state.edits[message.id] },
+                                groupChat = state.isGroup || state.isChannel,
+                                sender = message.senderKey?.let { senders[it] },
+                                onOpenSender = { message.senderKey?.let { key -> viewModel.openSender(key, onOpenProfile) } },
+                                forwardFrom = message.forward?.key?.let { senders[it] },
+                                reply = message.reply?.let { replies[it.messageId] },
+                                onReplyClick = {
+                                    val target = message.reply?.messageId
+                                    val idx = visibleMessages.indexOfFirst { it.id == target }
+                                    scope.launch {
+                                        if (idx >= 0) {
+                                            listState.animateScrollToItem(idx)
+                                            highlightId = target
+                                            delay(1500)
+                                            if (!searchOpen && highlightId == target) highlightId = null
+                                        } else {
+                                            snackbar.showSnackbar("Исходное сообщение не загружено")
+                                        }
                                     }
-                                }
-                            },
-                            onReact = { emoji -> viewModel.react(message.id, emoji) },
-                            onOpenComments = { onOpenComments(message.chatId, message.id) },
-                            commentsEnabled = !threadMode,
-                            ownBubbleColor = chatPrefs.ownBubbleColor.takeIf { it != 0L }?.let { Color(it) },
-                            otherBubbleColor = chatPrefs.otherBubbleColor.takeIf { it != 0L }?.let { Color(it) },
-                            bubbleOpacity = chatPrefs.bubbleOpacity / 100f,
-                            bubbleBackdrop = if (bubbleBlurOn) bubbleBackdrop else null,
-                            glassSettings = glass,
-                            highlighted = message.id == highlightId,
-                            searchQuery = if (searchOpen) search.query else "",
-                        )
+                                },
+                                onReact = { emoji -> viewModel.react(message.id, emoji) },
+                                onOpenComments = { onOpenComments(message.chatId, message.id) },
+                                commentsEnabled = !threadMode,
+                                ownBubbleColor = chatPrefs.ownBubbleColor.takeIf { it != 0L }?.let { Color(it) },
+                                otherBubbleColor = chatPrefs.otherBubbleColor.takeIf { it != 0L }?.let { Color(it) },
+                                bubbleOpacity = chatPrefs.bubbleOpacity / 100f,
+                                bubbleBackdrop = if (bubbleBlurOn) bubbleBackdrop else null,
+                                glassSettings = glass,
+                                highlighted = message.id == highlightId,
+                                searchQuery = if (searchOpen) search.query else "",
+                            )
+                        }
                     }
                     if (state.loadingOlder) {
                         item(key = "older-loader") {
@@ -874,7 +903,7 @@ fun ChatScreen(
                         Modifier
                             .weight(1f)
                             .height(TopBarContentHeight)
-                            .clickable(onClick = onOpenChatProfile),
+                            .combinedClickable(onClick = onOpenChatProfile, onLongClick = { wallpaperDialog = true }),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         FileAvatar(title = state.title, fileId = state.avatarFileId, fileState = viewModel::fileState, size = 40.dp)
@@ -1678,6 +1707,7 @@ private fun MessageBubble(
     groupChat: Boolean,
     sender: SenderInfo?,
     onOpenSender: () -> Unit,
+    forwardFrom: SenderInfo?,
     reply: ReplyPreview?,
     onReplyClick: () -> Unit,
     onReact: (String) -> Unit,
@@ -1714,6 +1744,11 @@ private fun MessageBubble(
 
     val replyRef = message.reply
     LaunchedEffect(replyRef) { if (replyRef != null) viewModel.ensureReply(replyRef) }
+
+    // Откуда переслано: имя автора оригинала подгружаем так же, как авторов сообщений.
+    val forward = message.forward
+    val forwardKey = forward?.key
+    LaunchedEffect(forwardKey) { if (forwardKey != null) viewModel.ensureSender(forwardKey) }
 
     // Expressive-группировка: у склеенных сообщений углы со стороны автора мелкие, у последнего в серии — «хвостик».
     // Когда приходит новое сообщение, углы предыдущего плавно «перетекают».
@@ -1779,6 +1814,9 @@ private fun MessageBubble(
                     if (showName && senderKey != null) {
                         SenderName(senderKey, sender, onOpenSender, Modifier.padding(start = 4.dp, bottom = 4.dp))
                     }
+                    if (forward != null) {
+                        ForwardHeader(forward, forwardFrom, Modifier.padding(start = 4.dp, bottom = 4.dp))
+                    }
                     MessageMedia(media, viewModel, onOpenPhoto)
                 }
             } else {
@@ -1814,6 +1852,13 @@ private fun MessageBubble(
                                 Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp),
                             )
                         }
+                        if (forward != null) {
+                            ForwardHeader(
+                                forward,
+                                forwardFrom,
+                                Modifier.padding(start = 16.dp, end = 16.dp, top = if (showName) 2.dp else 8.dp),
+                            )
+                        }
                         if (replyRef != null) {
                             ReplyQuote(
                                 preview = reply,
@@ -1845,6 +1890,7 @@ private fun MessageBubble(
                                 LocalOpenLink.current,
                                 LocalOpenUsername.current,
                                 message.emojis,
+                                links = message.links,
                             )
                             val emojiSize = (textSize * 1.25f).sp
                             val inline = rememberEmojiInlineContent(message.emojis, viewModel, emojiSize, viewModel.animateEmoji)
@@ -1962,6 +2008,112 @@ private fun MessageFooter(
                 )
             }
         }
+    }
+}
+
+/** Строка «Переслано от …» над пересланным сообщением: автор оригинала (пользователь, канал, скрытый отправитель). */
+@Composable
+private fun ForwardHeader(forward: ForwardRef, info: SenderInfo?, modifier: Modifier = Modifier) {
+    val content = LocalContentColor.current
+    val name = when {
+        forward.hiddenName.isNotEmpty() -> forward.hiddenName
+        info != null -> info.name
+        else -> "…"
+    }
+    val signature = forward.signature.takeIf { it.isNotBlank() }
+    Text(
+        buildAnnotatedString {
+            withStyle(SpanStyle(color = content.copy(alpha = 0.7f))) { append("Переслано от ") }
+            withStyle(SpanStyle(fontWeight = FontWeight.SemiBold)) { append(name) }
+            if (signature != null) withStyle(SpanStyle(color = content.copy(alpha = 0.7f))) { append(" · $signature") }
+        },
+        modifier = modifier,
+        style = MaterialTheme.typography.labelLarge,
+        maxLines = 2,
+        overflow = TextOverflow.Ellipsis,
+    )
+}
+
+/** Насколько надо потянуть сообщение влево, чтобы свайп сработал как «ответить». */
+private val SwipeReplyThreshold = 64.dp
+
+/**
+ * Свайп сообщения влево — ответить на него. Пузырь едет за пальцем, справа проявляется значок ответа;
+ * когда тянем дальше порога, срабатывает отклик, а при отпускании вызывается [onReply]. Вертикальная прокрутка не мешает.
+ */
+@Composable
+private fun SwipeToReply(
+    onReply: () -> Unit,
+    onThreshold: () -> Unit,
+    content: @Composable () -> Unit,
+) {
+    val thresholdPx = with(LocalDensity.current) { SwipeReplyThreshold.toPx() }
+    val maxPx = thresholdPx * 1.4f
+    val scope = rememberCoroutineScope()
+    val currentReply by rememberUpdatedState(onReply)
+    val currentThreshold by rememberUpdatedState(onThreshold)
+    var drag by remember { mutableFloatStateOf(0f) }
+    var armed by remember { mutableStateOf(false) }
+    var settle by remember { mutableStateOf<Job?>(null) }
+    val progress = (-drag / thresholdPx).coerceIn(0f, 1f)
+
+    fun springBack() {
+        settle?.cancel()
+        settle = scope.launch { animate(drag, 0f, animationSpec = spring()) { value, _ -> drag = value } }
+    }
+
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .pointerInput(thresholdPx) {
+                detectHorizontalDragGestures(
+                    onDragStart = {
+                        settle?.cancel()
+                        armed = false
+                    },
+                    onDragEnd = {
+                        if (armed) currentReply()
+                        armed = false
+                        springBack()
+                    },
+                    onDragCancel = {
+                        armed = false
+                        springBack()
+                    },
+                    onHorizontalDrag = { change, dragAmount ->
+                        change.consume()
+                        drag = (drag + dragAmount).coerceIn(-maxPx, 0f)
+                        val reached = -drag >= thresholdPx
+                        if (reached && !armed) currentThreshold()
+                        armed = reached
+                    },
+                )
+            },
+    ) {
+        if (progress > 0f) {
+            Box(
+                Modifier
+                    .align(Alignment.CenterEnd)
+                    .padding(end = 12.dp)
+                    .size(36.dp)
+                    .graphicsLayer {
+                        alpha = progress
+                        scaleX = 0.6f + 0.4f * progress
+                        scaleY = 0.6f + 0.4f * progress
+                    }
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = if (armed) 0.9f else 0.45f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.AutoMirrored.Filled.Reply,
+                    contentDescription = "Ответить",
+                    tint = MaterialTheme.colorScheme.onPrimary,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+        }
+        Box(Modifier.offset { IntOffset(drag.roundToInt(), 0) }) { content() }
     }
 }
 

@@ -12,7 +12,8 @@ sealed interface TgLinkResult {
 
 /** Передай сюда сам TdlClient (поле client внутри TelegramClient). */
 class TgLinkHandler(private val tdl: TdlClient) {
-    private val tme = Regex("""^(?:https?://)?(?:t|telegram)\.me/.+""", RegexOption.IGNORE_CASE)
+    // t.me, telegram.me и telegram.dog: обычные ссылки на чаты, сообщения и приглашения.
+    private val tme = Regex("""^(?:https?://)?(?:t\.me|telegram\.me|telegram\.dog)/.+""", RegexOption.IGNORE_CASE)
 
     fun isTgLink(url: String) = tme.matches(url) || url.startsWith("tg:", ignoreCase = true)
 

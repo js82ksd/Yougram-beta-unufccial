@@ -235,6 +235,26 @@ fun MainScreen(
         tab = newTab
         settingsPage = newPage
     }
+    // Переключение вкладок нижней панелью: настройки всегда открываются с главной страницы,
+    // а внутренняя история настроек (подстраницы) при уходе с вкладки сбрасывается.
+    fun selectTab(newTab: MainTab) {
+        if (newTab == tab) {
+            if (tab == MainTab.Settings && settingsPage != SettingsPage.Home) {
+                haptics(app.yougram.core.ui.Haptics.Kind.Tick)
+                while (backStack.isNotEmpty() && backStack.last().first == MainTab.Settings) backStack.removeAt(backStack.lastIndex)
+                settingsPage = SettingsPage.Home
+            }
+            return
+        }
+        haptics(app.yougram.core.ui.Haptics.Kind.Tick)
+        if (tab == MainTab.Settings) {
+            while (backStack.isNotEmpty() && backStack.last().first == MainTab.Settings) backStack.removeAt(backStack.lastIndex)
+            settingsPage = SettingsPage.Home
+        }
+        backStack.add(tab to SettingsPage.Home)
+        if (backStack.size > 30) backStack.removeAt(0)
+        tab = newTab
+    }
     var accountSheetOpen by remember { mutableStateOf(false) }
 
     val chatListViewModel: ChatListViewModel = viewModel(
@@ -571,7 +591,7 @@ fun MainScreen(
             GlassBottomBar(
                 selected = tab,
                 onSelect = {
-                    navigateTo(it, settingsPage)
+                    selectTab(it)
                     searching = false
                     query = ""
                 },

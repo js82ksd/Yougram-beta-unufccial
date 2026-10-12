@@ -3,6 +3,7 @@ package app.yougram.feature.chat.ui
 import android.content.Context
 import android.media.MediaMetadataRetriever
 import android.util.Rational
+import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.Preview
 import androidx.camera.core.UseCaseGroup
@@ -27,6 +28,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
@@ -35,6 +37,7 @@ import androidx.compose.material.icons.filled.FiberManualRecord
 import androidx.compose.material.icons.filled.FlipCameraAndroid
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -53,6 +56,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import app.yougram.core.settings.CameraPrefs
+import app.yougram.core.settings.VideoCameraChoice
 import app.yougram.core.ui.rememberDeviceTier
 import app.yougram.core.ui.DeviceTier
 import androidx.core.content.ContextCompat
@@ -80,12 +85,21 @@ fun VideoNoteRecorderDialog(
     onDismiss: () -> Unit,
     autoStart: Boolean = false,
     hold: Int = HOLD_NONE,
+    camera: CameraPrefs = CameraPrefs(),
+    onCameraUsed: (front: Boolean) -> Unit = {},
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val executor = remember { ContextCompat.getMainExecutor(context) }
 
-    var front by remember { mutableStateOf(true) }
+    val advanced = camera.advanced
+    var front by remember {
+        mutableStateOf(
+            if (advanced && camera.rememberLast) camera.lastFront else camera.videoCamera == VideoCameraChoice.Main,
+        )
+    }
+    var zoom by remember { mutableStateOf(0f) }
+    var boundCamera by remember { mutableStateOf<Camera?>(null) }
     var recordingState by remember { mutableStateOf(false) }
     var seconds by remember { mutableStateOf(0) }
     var videoCapture by remember { mutableStateOf<VideoCapture<Recorder>?>(null) }
@@ -114,10 +128,15 @@ fun VideoNoteRecorderDialog(
                     .build()
                 val selector = if (front) CameraSelector.DEFAULT_FRONT_CAMERA else CameraSelector.DEFAULT_BACK_CAMERA
                 cameraProvider.unbindAll()
-                cameraProvider.bindToLifecycle(lifecycleOwner, selector, group)
+                boundCamera = cameraProvider.bindToLifecycle(lifecycleOwner, selector, group)
+                zoom = 0f
                 videoCapture = capture
             }
         }, executor)
+    }
+
+    LaunchedEffect(zoom, boundCamera) {
+        boundCamera?.cameraControl?.setLinearZoom(zoom)
     }
 
     LaunchedEffect(recordingState) {
@@ -206,6 +225,15 @@ fun VideoNoteRecorderDialog(
                         },
                     )
                 }
+                if (advanced && camera.zoomSlider) {
+                    Spacer(Modifier.height(12.dp))
+                    Slider(
+                        value = zoom,
+                        onValueChange = { zoom = it },
+                        onValueChangeFinished = { if (!camera.staticZoom) zoom = 0f },
+                        modifier = Modifier.width(220.dp),
+                    )
+                }
                 Spacer(Modifier.height(20.dp))
                 Text(
                     "%d:%02d".format(seconds / 60, seconds % 60),
@@ -244,7 +272,12 @@ fun VideoNoteRecorderDialog(
                     RoundButton(
                         Icons.Filled.FlipCameraAndroid, "Сменить камеру",
                         Color.White.copy(alpha = if (recordingState) 0.06f else 0.18f),
-                    ) { if (!recordingState) front = !front }
+                    ) {
+                        if (!recordingState) {
+                            front = !front
+                            onCameraUsed(front)
+                        }
+                    }
                 }
             }
         }
