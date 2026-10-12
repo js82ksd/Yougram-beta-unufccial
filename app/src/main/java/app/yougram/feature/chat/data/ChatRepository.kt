@@ -421,6 +421,10 @@ data class ProfileDetails(
     val id: Long,
     val avatarFileId: Int?,
     val muted: Boolean = false,
+    /** Можно менять название, описание и фото. */
+    val canEdit: Boolean = false,
+    /** Можно менять публичный адрес (создатель супергруппы или канала). */
+    val canSetUsername: Boolean = false,
 )
 
 /** Досье на пользователя: только то, что Telegram и так отдаёт клиенту о собеседнике. */
@@ -1595,6 +1599,8 @@ class ChatRepository(
                         ?: full?.inviteLink?.inviteLink?.removePrefix("https://"),
                     id = chatId,
                     avatarFileId = big?.id,
+                    canEdit = canEditInfo(group.status),
+                    canSetUsername = group.status is ChatMemberStatusCreator,
                 )
             }
             is ChatTypeBasicGroup -> {
@@ -1612,6 +1618,7 @@ class ChatRepository(
                     link = full?.inviteLink?.inviteLink?.removePrefix("https://"),
                     id = chatId,
                     avatarFileId = big?.id,
+                    canEdit = canEditInfo(group.status),
                 )
             }
             else -> ProfileDetails(
@@ -1629,6 +1636,59 @@ class ChatRepository(
             )
         }
         return base.copy(muted = chat.notificationSettings.muteFor > 0)
+    }
+
+    private fun canEditInfo(status: ChatMemberStatus?): Boolean = when (status) {
+        is ChatMemberStatusCreator -> true
+        is ChatMemberStatusAdministrator -> status.rights.canChangeInfo
+        else -> false
+    }
+
+    /** Проверяет адрес для уже существующего чата [chatId]. */
+    suspend fun checkChatUsernameFor(chatId: Long, username: String): UsernameCheck =
+        when (client.checkChatUsername(chatId = chatId, username = username).getOrThrow()) {
+            is dev.g000sha256.tdl.dto.CheckChatUsernameResultOk -> UsernameCheck.Ok
+            is dev.g000sha256.tdl.dto.CheckChatUsernameResultUsernameInvalid -> UsernameCheck.Invalid
+            is dev.g000sha256.tdl.dto.CheckChatUsernameResultUsernameOccupied -> UsernameCheck.Occupied
+            is dev.g000sha256.tdl.dto.CheckChatUsernameResultPublicChatsTooMany -> UsernameCheck.TooMany
+            else -> UsernameCheck.Unavailable
+        }
+
+    /**
+     * Сохраняет изменения группы или канала. Поля, равные null, не трогаются.
+     * [username] = "" делает чат приватным. Возвращает список того, что не удалось сохранить.
+     */
+    suspend fun editChat(
+        chatId: Long,
+        title: String?,
+        description: String?,
+        username: String?,
+        photoPath: String?,
+        removePhoto: Boolean,
+    ): List<String> {
+        val warnings = ArrayList<String>()
+        if (title != null) {
+            runCatching { client.setChatTitle(chatId = chatId, title = title.trim()).getOrThrow() }
+                .onFailure { warnings += "Не удалось сохранить название" }
+        }
+        if (description != null) {
+            runCatching { client.setChatDescription(chatId = chatId, description = description.trim()).getOrThrow() }
+                .onFailure { warnings += "Не удалось сохранить описание" }
+        }
+        if (username != null) {
+            runCatching {
+                val chat = client.getChat(chatId = chatId).getOrThrow()
+                val supergroupId = (chat.type as ChatTypeSupergroup).supergroupId
+                client.setSupergroupUsername(supergroupId = supergroupId, username = username).getOrThrow()
+            }.onFailure { warnings += "Не удалось сохранить адрес" }
+        }
+        if (photoPath != null) {
+            runCatching { setNewChatPhoto(chatId, photoPath) }.onFailure { warnings += "Не удалось поставить фото" }
+        } else if (removePhoto) {
+            runCatching { client.setChatPhoto(chatId = chatId, photo = null).getOrThrow() }
+                .onFailure { warnings += "Не удалось убрать фото" }
+        }
+        return warnings
     }
 
     /** Последние сообщения чата для вкладок профиля (медиа, файлы, ссылки); фильтрация — на стороне UI. */

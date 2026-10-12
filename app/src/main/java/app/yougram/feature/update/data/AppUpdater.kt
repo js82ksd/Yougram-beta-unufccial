@@ -2,6 +2,8 @@ package app.yougram.feature.update.data
 
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageInfo
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.provider.Settings
 import androidx.core.content.FileProvider
@@ -9,18 +11,26 @@ import app.yougram.BuildConfig
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
+import java.security.MessageDigest
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
-data class UpdateInfo(val versionCode: Int, val versionName: String, val apkUrl: String, val notes: String)
+data class UpdateInfo(
+    val versionName: String,
+    val apkUrl: String,
+    val notes: String,
+    val sizeBytes: Long = 0L,
+    val sha256: String? = null,
+)
 
 sealed interface UpdateState {
     data object Idle : UpdateState
@@ -33,9 +43,10 @@ sealed interface UpdateState {
 }
 
 /**
- * Обновление приложения изнутри клиента. По адресу [BuildConfig.UPDATE_URL] лежит JSON:
- * {"versionCode": 2, "versionName": "0.2.0", "apkUrl": "https://.../yougram.apk", "notes": "что нового"}.
- * Если versionCode больше установленного — APK скачивается в кэш и отдаётся системному установщику.
+ * Обновление изнутри клиента. Источник правды — последний релиз на GitHub:
+ *  - тег релиза (v1.1.0) = версия, сравнивается с BuildConfig.VERSION_NAME;
+ *  - первый файл *.apk из релиза = то, что скачивается;
+ *  - описание релиза = «что нового».
  */
 class AppUpdater(context: Context, private val scope: CoroutineScope) {
     private val appContext = context.applicationContext
@@ -50,15 +61,13 @@ class AppUpdater(context: Context, private val scope: CoroutineScope) {
         if (job?.isActive == true) return
         // Уже скачанное или качающееся обновление не сбрасываем повторной проверкой.
         if (_state.value is UpdateState.Downloading || _state.value is UpdateState.Ready) return
-        val url = BuildConfig.UPDATE_URL
-        if (!url.startsWith("https://")) {
-            _state.value = UpdateState.Error("Адрес обновлений не задан (UPDATE_URL в local.properties)")
-            return
-        }
         _state.value = UpdateState.Checking
         job = scope.launch {
-            _state.value = runCatching { withContext(Dispatchers.IO) { fetchInfo(url) } }.fold(
-                onSuccess = { if (it.versionCode > BuildConfig.VERSION_CODE) UpdateState.Available(it) else UpdateState.UpToDate },
+            _state.value = runCatching { withContext(Dispatchers.IO) { fetchLatest() } }.fold(
+                onSuccess = {
+                    if (isNewer(it.versionName, BuildConfig.VERSION_NAME)) UpdateState.Available(it)
+                    else UpdateState.UpToDate
+                },
                 onFailure = { UpdateState.Error("Не удалось проверить обновления: ${it.message ?: it.javaClass.simpleName}") },
             )
         }
@@ -66,10 +75,6 @@ class AppUpdater(context: Context, private val scope: CoroutineScope) {
 
     fun download() {
         val info = (_state.value as? UpdateState.Available)?.info ?: return
-        if (!info.apkUrl.startsWith("https://")) {
-            _state.value = UpdateState.Error("Ссылка на APK должна начинаться с https://")
-            return
-        }
         _state.value = UpdateState.Downloading(info, 0f)
         job = scope.launch {
             _state.value = runCatching { withContext(Dispatchers.IO) { downloadApk(info) } }.fold(
@@ -78,6 +83,7 @@ class AppUpdater(context: Context, private val scope: CoroutineScope) {
             )
         }
     }
+
 
     /** Запускает установку. Если нет разрешения «Установка неизвестных приложений» — открывает его настройку. */
     fun install(): Boolean {
@@ -98,42 +104,71 @@ class AppUpdater(context: Context, private val scope: CoroutineScope) {
         return true
     }
 
-    private fun fetchInfo(url: String): UpdateInfo {
-        val conn = open(url)
+    // ---------- проверка ----------
+
+    private fun fetchLatest(): UpdateInfo {
+        val conn = open("https://api.github.com/repos/$REPO/releases/latest", api = true)
         try {
             val json = JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
+            val tag = json.getString("tag_name")
+            val assets = json.getJSONArray("assets")
+            var asset: JSONObject? = null
+            for (i in 0 until assets.length()) {
+                val a = assets.getJSONObject(i)
+                if (a.getString("name").endsWith(".apk", ignoreCase = true)) {
+                    // Если файлов несколько, берём тот, что называется yougram.apk.
+                    if (asset == null || a.getString("name").equals("yougram.apk", ignoreCase = true)) asset = a
+                }
+            }
+            asset ?: error("в релизе $tag нет файла .apk")
+            val digest = asset.optString("digest")
             return UpdateInfo(
-                versionCode = json.getInt("versionCode"),
-                versionName = json.optString("versionName"),
-                apkUrl = json.getString("apkUrl"),
-                notes = json.optString("notes"),
+                versionName = tag.removePrefix("v").removePrefix("V"),
+                apkUrl = asset.getString("browser_download_url"),
+                notes = json.optString("body"),
+                sizeBytes = asset.optLong("size", 0L),
+                sha256 = digest.removePrefix("sha256:").takeIf { digest.startsWith("sha256:") && it.length == 64 },
             )
         } finally {
             conn.disconnect()
         }
     }
 
+    /** Сравнение по числам: 1.10.0 > 1.9.3, суффиксы вроде -beta игнорируются. */
+    private fun isNewer(remote: String, local: String): Boolean {
+        fun parts(v: String) = Regex("\\d+").findAll(v).map { it.value.toIntOrNull() ?: 0 }.toList()
+        val a = parts(remote)
+        val b = parts(local)
+        for (i in 0 until maxOf(a.size, b.size)) {
+            val x = a.getOrElse(i) { 0 }
+            val y = b.getOrElse(i) { 0 }
+            if (x != y) return x > y
+        }
+        return false
+    }
+
+    // ---------- скачивание и проверка файла ----------
+
     private suspend fun downloadApk(info: UpdateInfo): File {
         dir.deleteRecursively()
         dir.mkdirs()
-        val target = File(dir, "yougram-${info.versionCode}.apk")
+        val target = File(dir, "yougram-${info.versionName}.apk")
         val tmp = File(dir, "download.part")
-        val conn = open(info.apkUrl)
+        val conn = open(info.apkUrl, api = false)
         try {
-            val total = conn.contentLengthLong
+            val total = conn.contentLengthLong.takeIf { it > 0 } ?: info.sizeBytes
             var done = 0L
             conn.inputStream.use { input ->
                 tmp.outputStream().use { out ->
                     val buf = ByteArray(64 * 1024)
                     while (true) {
-                        if (!scope.isActive) error("отменено")
+                        currentCoroutineContext().ensureActive()
                         val n = input.read(buf)
                         if (n < 0) break
                         out.write(buf, 0, n)
                         done += n
                         if (total > 0L) {
-                            val progress = (done.toFloat() / total).coerceIn(0f, 1f)
-                            _state.value = UpdateState.Downloading(info, progress)
+                            _state.value = UpdateState.Downloading(info, (done.toFloat() / total).coerceIn(0f, 1f))
                         }
                     }
                 }
@@ -141,21 +176,82 @@ class AppUpdater(context: Context, private val scope: CoroutineScope) {
         } finally {
             conn.disconnect()
         }
-        // Проверяем, что это наш APK и версия действительно новее.
-        val pkg = appContext.packageManager.getPackageArchiveInfo(tmp.path, 0)
-            ?: error("файл не похож на APK")
-        check(pkg.packageName == appContext.packageName) { "чужой пакет ${pkg.packageName}" }
-        check(pkg.longVersionCode > BuildConfig.VERSION_CODE) { "в APK нет новой версии" }
+        verify(tmp, info)
         check(tmp.renameTo(target)) { "не удалось сохранить файл" }
         return target
     }
 
-    private fun open(url: String): HttpURLConnection {
+    private fun verify(file: File, info: UpdateInfo) {
+        if (info.sizeBytes > 0) {
+            check(file.length() == info.sizeBytes) { "файл скачался не полностью (${file.length()} из ${info.sizeBytes} байт)" }
+        }
+        info.sha256?.let { expected ->
+            check(sha256(file).equals(expected, ignoreCase = true)) { "контрольная сумма не совпала, файл повреждён" }
+        }
+
+        val pm = appContext.packageManager
+        val flags = PackageManager.GET_SIGNING_CERTIFICATES
+        val apk = pm.getPackageArchiveInfo(file.path, flags) ?: error("файл не похож на APK")
+        check(apk.packageName == appContext.packageName) { "чужой пакет ${apk.packageName}" }
+
+        val installedCode = BuildConfig.VERSION_CODE.toLong()
+        check(apk.longVersionCode > installedCode) {
+            "в релизе ${info.versionName} лежит APK ${apk.versionName} (код ${apk.longVersionCode}), " +
+                    "а установлена ${BuildConfig.VERSION_NAME} (код $installedCode). Загрузите в релиз свежую сборку"
+        }
+
+        val installed = pm.getPackageInfo(appContext.packageName, flags)
+        check(signers(apk).intersect(signers(installed)).isNotEmpty()) {
+            "APK подписан другим ключом, Android не установит его поверх. Соберите release тем же ключом yougram.jks"
+        }
+    }
+
+    private fun signers(info: PackageInfo): Set<String> {
+        val si = info.signingInfo ?: return emptySet()
+        val certs = if (si.hasMultipleSigners()) si.apkContentsSigners else si.signingCertificateHistory
+        return certs.orEmpty().map { sha256(it.toByteArray()) }.toSet()
+    }
+
+    private fun sha256(file: File): String {
+        val md = MessageDigest.getInstance("SHA-256")
+        file.inputStream().use { input ->
+            val buf = ByteArray(64 * 1024)
+            while (true) {
+                val n = input.read(buf)
+                if (n < 0) break
+                md.update(buf, 0, n)
+            }
+        }
+        return md.digest().joinToString("") { "%02x".format(it) }
+    }
+
+    private fun sha256(bytes: ByteArray): String =
+        MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
+
+    // ---------- сеть ----------
+
+    private fun open(url: String, api: Boolean): HttpURLConnection {
         val conn = URL(url).openConnection() as HttpURLConnection
         conn.connectTimeout = 15_000
         conn.readTimeout = 30_000
         conn.instanceFollowRedirects = true
-        check(conn.responseCode in 200..299) { "HTTP ${conn.responseCode}" }
+        conn.setRequestProperty("User-Agent", "Yougram/${BuildConfig.VERSION_NAME}")
+        if (api) conn.setRequestProperty("Accept", "application/vnd.github+json")
+        val code = conn.responseCode
+        if (code !in 200..299) {
+            conn.disconnect()
+            error(
+                when (code) {
+                    403, 429 -> "лимит запросов GitHub, попробуйте позже"
+                    404 -> "релиз не найден (HTTP 404)"
+                    else -> "HTTP $code"
+                },
+            )
+        }
         return conn
+    }
+
+    private companion object {
+        const val REPO = "julfy-0/Yougram"
     }
 }
