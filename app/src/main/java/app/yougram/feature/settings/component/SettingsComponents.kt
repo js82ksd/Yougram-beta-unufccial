@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -37,7 +38,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.ToggleButton
-import androidx.compose.material3.ToggleButtonDefaults
 import androidx.compose.material3.toShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -256,21 +256,31 @@ fun <T> ConnectedChoiceGroup(
                 horizontalArrangement = Arrangement.spacedBy(ButtonGroupDefaults.ConnectedSpaceBetween),
             ) {
                 row.forEachIndexed { index, option ->
-                    // TODO: если connected*ButtonShapes недоступны в вашей версии, заменить на ToggleButtonDefaults.shapes()
-                    val shapes = when {
-                        row.size == 1 -> ToggleButtonDefaults.shapes()
-                        index == 0 -> ButtonGroupDefaults.connectedLeadingButtonShapes()
-                        index == row.lastIndex -> ButtonGroupDefaults.connectedTrailingButtonShapes()
-                        else -> ButtonGroupDefaults.connectedMiddleButtonShapes()
-                    }
-                    ToggleButton(
-                        checked = option == selected,
-                        onCheckedChange = { checked -> if (checked) onSelect(option) },
-                        modifier = Modifier.weight(1f),
-                        shapes = shapes,
-                        contentPadding = PaddingValues(horizontal = 8.dp),
-                    ) {
+                    val buttonContent: @Composable RowScope.() -> Unit = {
                         Text(label(option), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    // Единственный вариант в ряду — стандартные формы кнопки (без ToggleButtonDefaults.shapes(),
+                    // его нет в некоторых версиях material3).
+                    when {
+                        row.size == 1 -> ToggleButton(
+                            checked = option == selected,
+                            onCheckedChange = { checked -> if (checked) onSelect(option) },
+                            modifier = Modifier.weight(1f),
+                            contentPadding = PaddingValues(horizontal = 8.dp),
+                            content = buttonContent,
+                        )
+                        else -> ToggleButton(
+                            checked = option == selected,
+                            onCheckedChange = { checked -> if (checked) onSelect(option) },
+                            modifier = Modifier.weight(1f),
+                            shapes = when (index) {
+                                0 -> ButtonGroupDefaults.connectedLeadingButtonShapes()
+                                row.lastIndex -> ButtonGroupDefaults.connectedTrailingButtonShapes()
+                                else -> ButtonGroupDefaults.connectedMiddleButtonShapes()
+                            },
+                            contentPadding = PaddingValues(horizontal = 8.dp),
+                            content = buttonContent,
+                        )
                     }
                 }
             }
