@@ -4,8 +4,8 @@ import com.android.build.api.instrumentation.InstrumentationScope
 
 plugins {
     id("com.android.application")
-    alias(libs.plugins.kotlin.android)
-    alias(libs.plugins.kotlin.compose)
+    id("org.jetbrains.kotlin.android")
+    id("org.jetbrains.kotlin.plugin.compose")
 }
 
 val localProps = Properties().apply {
@@ -25,7 +25,7 @@ androidComponents {
 
 android {
     namespace = "app.yougram"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "app.yougram"
@@ -155,6 +155,7 @@ dependencies {
 
     // Lua-плагины (LuaPluginManager, PluginManager).
     implementation("org.luaj:luaj-jse:3.0.1")
+    implementation("androidx.graphics:graphics-shapes:1.1.0")
 }
 // Видео-рендерер из Telegram (org.webrtc.TextureViewRenderer) тянет их UI-классы LiteMode и VoIPService.
 // Видеозвонков в Yougram нет, поэтому файл не компилируем; сам исходник остаётся на месте и переживает повторное копирование.

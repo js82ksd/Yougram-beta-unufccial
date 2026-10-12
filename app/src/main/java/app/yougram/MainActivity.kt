@@ -45,7 +45,7 @@ class MainActivity : ComponentActivity() {
         // Ссылки t.me / tg:// из других приложений.
         if (intent?.action == Intent.ACTION_VIEW) {
             intent.dataString?.let { container.pendingOpenUrl.value = it }
-            intent.data = null
+            intent.setData(null)
             return
         }
         if (intent == null || !intent.hasExtra(NotificationCenter.EXTRA_CHAT_ID)) return
