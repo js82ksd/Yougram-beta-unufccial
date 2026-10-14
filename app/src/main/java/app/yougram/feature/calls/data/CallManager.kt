@@ -152,18 +152,36 @@ class CallManager(
         }
     }
 
-    fun accept() {
+    fun accept(withVideo: Boolean = false) {
         val c = _call.value ?: return
         if (c.isOutgoing || c.phase != CallPhase.RINGING) return
         if (!hasMic()) return
-        CallLog.d(TAG, "accept id=${c.id}")
+        CallLog.d(TAG, "accept id=${c.id} withVideo=$withVideo")
         scope.launch {
             val result = client.acceptCall(callId = c.id, protocol = protocol)
             if (result is TdlResult.Failure) {
                 CallLog.e(TAG, "acceptCall failed code=${result.code} message=${result.message}")
                 finishLocal(c, "Не удалось принять звонок", discard = false)
+            } else if (withVideo) {
+                _call.update { it?.copy(isVideo = true) }
             }
         }
+    }
+
+    fun toggleCamera(enable: Boolean) {
+        val c = _call.value ?: return
+        CallLog.d(TAG, "toggleCamera enable=$enable")
+        val tgEngine = engine as? TgCallsEngine
+        if (enable) {
+            tgEngine?.setupCamera(isFront = true)
+        } else {
+            tgEngine?.stopCamera()
+        }
+        _call.update { it?.copy(isVideo = enable) }
+    }
+
+    fun switchCamera() {
+        (engine as? TgCallsEngine)?.switchCamera()
     }
 
     /** Сбросить или отклонить звонок. */

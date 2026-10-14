@@ -83,7 +83,9 @@ import dev.g000sha256.tdl.dto.MessageSenderChat
 import dev.g000sha256.tdl.dto.MessageSenderUser
 import dev.g000sha256.tdl.dto.MessageSticker
 import dev.g000sha256.tdl.dto.MessageText
+import dev.g000sha256.tdl.dto.TextEntity
 import dev.g000sha256.tdl.dto.TextEntityTypeCustomEmoji
+import dev.g000sha256.tdl.dto.TextEntityTypeMentionName
 import dev.g000sha256.tdl.dto.TextEntityTypeTextUrl
 import dev.g000sha256.tdl.dto.MessageOriginChannel
 import dev.g000sha256.tdl.dto.MessageOriginChat
@@ -963,14 +965,58 @@ class ChatRepository(
         io { spy.upsert(items) }
     }
 
-    /** Команды бота для личного чата с ботом (пусто, если чат не с ботом или команд нет). */
+    /**
+     * Команды ботов для подсказки по «/». В личном чате с ботом — его команды как есть;
+     * в группах — команды всех ботов группы в виде «команда@бот» (так их понимает Telegram).
+     */
     suspend fun botCommands(chatId: Long): List<Pair<String, String>> = runCatching {
-        val type = client.getChat(chatId = chatId).getOrThrow().type as? ChatTypePrivate
-            ?: return@runCatching emptyList()
-        val user = client.getUser(userId = type.userId).getOrThrow()
-        if (user.type !is UserTypeBot) return@runCatching emptyList()
-        val full = client.getUserFullInfo(userId = type.userId).getOrThrow()
-        full.botInfo?.commands?.map { it.command to it.description }.orEmpty()
+        val type = client.getChat(chatId = chatId).getOrThrow().type
+        when (type) {
+            is ChatTypePrivate -> {
+                val user = client.getUser(userId = type.userId).getOrThrow()
+                if (user.type !is UserTypeBot) return@runCatching emptyList()
+                val full = client.getUserFullInfo(userId = type.userId).getOrThrow()
+                full.botInfo?.commands?.map { it.command to it.description }.orEmpty()
+            }
+            is ChatTypeSupergroup -> {
+                if (type.isChannel) return@runCatching emptyList()
+                val full = client.getSupergroupFullInfo(supergroupId = type.supergroupId).getOrThrow()
+                groupBotCommands(full.botCommands.toList())
+            }
+            is ChatTypeBasicGroup -> {
+                val full = client.getBasicGroupFullInfo(basicGroupId = type.basicGroupId).getOrThrow()
+                groupBotCommands(full.botCommands.toList())
+            }
+            else -> emptyList()
+        }
+    }.getOrDefault(emptyList())
+
+    private suspend fun groupBotCommands(bots: List<dev.g000sha256.tdl.dto.BotCommands>): List<Pair<String, String>> =
+        bots.flatMap { entry ->
+            val username = (client.getUser(userId = entry.botUserId) as? TdlResult.Success)?.result
+                ?.usernames?.activeUsernames?.firstOrNull() ?: return@flatMap emptyList()
+            entry.commands.map { "${it.command}@$username" to it.description }
+        }
+
+    /** Участник чата для подсказки упоминания по «@». */
+    data class MentionCandidate(val userId: Long, val name: String, val username: String?)
+
+    /** Поиск участников группы по началу имени или username для упоминания. В личных чатах и каналах — пусто. */
+    suspend fun searchMentions(chatId: Long, query: String): List<MentionCandidate> = runCatching {
+        val type = client.getChat(chatId = chatId).getOrThrow().type
+        val isGroup = type is ChatTypeBasicGroup || (type is ChatTypeSupergroup && !type.isChannel)
+        if (!isGroup) return@runCatching emptyList()
+        val members = client.searchChatMembers(chatId = chatId, query = query, limit = 20, filter = null).getOrThrow()
+        members.members.mapNotNull { m ->
+            val userId = (m.memberId as? MessageSenderUser)?.userId ?: return@mapNotNull null
+            val user = (client.getUser(userId = userId) as? TdlResult.Success)?.result ?: return@mapNotNull null
+            if (user.type is dev.g000sha256.tdl.dto.UserTypeDeleted) return@mapNotNull null
+            MentionCandidate(
+                userId = userId,
+                name = "${user.firstName} ${user.lastName}".trim().ifEmpty { user.usernames?.activeUsernames?.firstOrNull().orEmpty() },
+                username = user.usernames?.activeUsernames?.firstOrNull(),
+            )
+        }
     }.getOrDefault(emptyList())
 
     private fun actionLabel(a: ChatAction): String? = when (a) {
@@ -1476,7 +1522,14 @@ class ChatRepository(
         }
     }
 
-    suspend fun sendText(chatId: Long, rawText: String, replyToId: Long? = null, fromPlugin: Boolean = false) {
+    suspend fun sendText(
+        chatId: Long,
+        rawText: String,
+        replyToId: Long? = null,
+        fromPlugin: Boolean = false,
+        /** Упоминания людей без username: текст «@Имя» → id пользователя. */
+        mentions: Map<String, Long> = emptyMap(),
+    ) {
         // Плагинные отправки идут мимо хука, иначе плагин зациклится на собственных сообщениях.
         val text = if (fromPlugin) rawText else plugins?.beforeSend(chatId, rawText, replyToId) ?: return
         client.sendMessage(
@@ -1487,11 +1540,29 @@ class ChatRepository(
             options = null,
             replyMarkup = null,
             inputMessageContent = InputMessageText(
-                text = FormattedText(text = text, entities = emptyArray()),
+                text = FormattedText(text = text, entities = if (text == rawText) mentionEntities(text, mentions) else emptyArray()),
                 linkPreviewOptions = null,
                 clearDraft = true,
             ),
         ).getOrThrow()
+    }
+
+    /** Сущности «упоминание по id» для каждого вхождения «@Имя» из [mentions] (смещения — в UTF-16, как в TDLib). */
+    private fun mentionEntities(text: String, mentions: Map<String, Long>): Array<TextEntity> {
+        if (mentions.isEmpty()) return emptyArray()
+        val out = mutableListOf<TextEntity>()
+        for ((label, userId) in mentions) {
+            var from = 0
+            while (true) {
+                val at = text.indexOf(label, from)
+                if (at < 0) break
+                val end = at + label.length
+                val boundary = end >= text.length || !text[end].isLetterOrDigit()
+                if (boundary) out += TextEntity(offset = at, length = label.length, type = TextEntityTypeMentionName(userId = userId))
+                from = end
+            }
+        }
+        return out.sortedBy { it.offset }.toTypedArray()
     }
 
     /**
@@ -2237,6 +2308,61 @@ class ChatRepository(
             avatarFileId = avatar?.id,
         )
     }
+
+    /**
+     * Все аватарки чата, от новых к старым. У пользователя — вся история фото профиля,
+     * у группы и канала (или если история скрыта настройками приватности) — только текущее фото.
+     */
+    suspend fun avatarHistory(chatId: Long): List<MediaItem> {
+        val chat = client.getChat(chatId = chatId).getOrThrow()
+        val type = chat.type
+        if (type is ChatTypePrivate) {
+            val history = userAvatarHistory(type.userId)
+            if (history.isNotEmpty()) return history
+        }
+        val big = chat.photo?.big ?: return emptyList()
+        track(big)
+        return listOf(avatarMedia(big, "avatar_${chat.id}.jpg"))
+    }
+
+    /** История аватарок текущего пользователя, от новых к старым. */
+    suspend fun ownAvatarHistory(): List<MediaItem> =
+        userAvatarHistory(client.getMe().getOrThrow().id)
+
+    private suspend fun userAvatarHistory(userId: Long): List<MediaItem> {
+        val photos = (client.getUserProfilePhotos(userId = userId, offset = 0, limit = 100) as? TdlResult.Success)
+            ?.result?.photos.orEmpty().filterNotNull()
+        return photos.mapNotNull { p ->
+            val sizes = p.sizes.orEmpty().filterNotNull()
+            val full = sizes.maxByOrNull { it.width.toLong() * it.height } ?: return@mapNotNull null
+            val preview = sizes.firstOrNull { maxOf(it.width, it.height) >= 600 } ?: full
+            track(full.photo)
+            track(preview.photo)
+            MediaItem(
+                kind = MediaKind.PHOTO,
+                fileId = full.photo.id,
+                previewFileId = preview.photo.id,
+                width = full.width,
+                height = full.height,
+                name = "avatar_${userId}_${p.id}.jpg",
+                mimeType = "image/jpeg",
+                size = sizeOf(full.photo),
+                miniThumb = p.minithumbnail?.data,
+            )
+        }
+    }
+
+    private fun avatarMedia(file: TdFile, name: String) = MediaItem(
+        kind = MediaKind.PHOTO,
+        fileId = file.id,
+        previewFileId = null,
+        width = 0,
+        height = 0,
+        name = name,
+        mimeType = "image/jpeg",
+        size = sizeOf(file),
+        miniThumb = null,
+    )
 
     /** true, если у текущего пользователя подключён Telegram Premium. */
     suspend fun isPremium(): Boolean = runCatching { client.getMe().getOrThrow().isPremium }.getOrDefault(false)

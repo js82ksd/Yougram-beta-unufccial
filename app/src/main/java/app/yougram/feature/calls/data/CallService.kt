@@ -97,7 +97,13 @@ class CallService : Service() {
         val notification = buildNotification(call)
         val phone = ServiceInfo.FOREGROUND_SERVICE_TYPE_PHONE_CALL
         val withMic = phone or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
-        val attempts = if (hasMic()) listOf(withMic, phone) else listOf(phone)
+        val withCamera = withMic or ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
+        val isVideo = call?.isVideo == true && hasCamera()
+        val attempts = when {
+            isVideo -> listOf(withCamera, withMic, phone)
+            hasMic() -> listOf(withMic, phone)
+            else -> listOf(phone)
+        }
         for (type in attempts) {
             try {
                 startForeground(NOTIFICATION_ID, notification, type)
@@ -108,6 +114,8 @@ class CallService : Service() {
         }
         return false
     }
+
+    private fun hasCamera() = ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
 
     private fun buildNotification(call: ActiveCall?): Notification {
         val open = PendingIntent.getActivity(

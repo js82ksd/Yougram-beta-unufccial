@@ -158,6 +158,17 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        val activeCall = container.callManager.call.value
+        if (activeCall != null && activeCall.isVideo && activeCall.phase == app.yougram.feature.calls.data.CallPhase.ACTIVE) {
+            val params = android.app.PictureInPictureParams.Builder()
+                .setAspectRatio(android.util.Rational(9, 16))
+                .build()
+            enterPictureInPictureMode(params)
+        }
+    }
+
     override fun onStart() {
         super.onStart()
         container.notificationCenter.appVisible = true

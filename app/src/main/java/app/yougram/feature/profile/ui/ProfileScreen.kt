@@ -146,6 +146,7 @@ fun ProfileScreen(
     var showEdit by remember { mutableStateOf(false) }
     var photoViewer by remember { mutableStateOf<MediaItem?>(null) }
     var videoViewer by remember { mutableStateOf<MediaItem?>(null) }
+    var showAvatars by remember { mutableStateOf(false) }
     var pendingVideo by remember { mutableStateOf(false) }
     val callPermissions = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
         val userId = state.details?.id
@@ -205,6 +206,16 @@ fun ProfileScreen(
     videoViewer?.let { opened ->
         ProfileVideoDialog(opened, viewModel) { videoViewer = null }
     }
+    if (showAvatars && state.avatars.isNotEmpty()) {
+        app.yougram.feature.chat.ui.PhotoViewer(
+            items = state.avatars,
+            startIndex = 0,
+            fileState = { viewModel.fileState(it) },
+            download = { id, priority -> viewModel.download(id, priority) },
+            onDismiss = { showAvatars = false },
+            allowSave = true,
+        )
+    }
 
     SystemBarsGlass(Modifier.fillMaxSize()) {
         if (details == null) {
@@ -226,7 +237,7 @@ fun ProfileScreen(
                 ),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                item { Appear(0, entered.value) { ProfileHeader(details, viewModel, listState, entered.value) } }
+                item { Appear(0, entered.value) { ProfileHeader(details, viewModel, listState, entered.value, onAvatarClick = { if (state.avatars.isNotEmpty()) showAvatars = true }) } }
                 item { Appear(1, entered.value) { ActionsGroup(actions) } }
                 item {
                     Appear(2, entered.value) {
@@ -372,7 +383,13 @@ private fun actionsFor(
 }
 
 @Composable
-private fun ProfileHeader(details: ProfileDetails, viewModel: ProfileViewModel, listState: LazyListState, entered: Boolean) {
+private fun ProfileHeader(
+    details: ProfileDetails,
+    viewModel: ProfileViewModel,
+    listState: LazyListState,
+    entered: Boolean,
+    onAvatarClick: () -> Unit,
+) {
     Column(
         Modifier
             .fillMaxWidth()
@@ -404,6 +421,7 @@ private fun ProfileHeader(details: ProfileDetails, viewModel: ProfileViewModel, 
                         .padding(top = 90.dp)
                         .popIn(entered)
                         .clip(CircleShape)
+                        .clickable(onClickLabel = "Открыть аватар", onClick = onAvatarClick)
                         .background(MaterialTheme.colorScheme.surface)
                         .padding(4.dp),
                 ) {
@@ -417,7 +435,14 @@ private fun ProfileHeader(details: ProfileDetails, viewModel: ProfileViewModel, 
             }
         } else {
             // Без баннера: аватар в «цветочном» ореоле контейнера primary.
-            Box(Modifier.popIn(entered).size(132.dp), contentAlignment = Alignment.Center) {
+            Box(
+                Modifier
+                    .popIn(entered)
+                    .size(132.dp)
+                    .clip(MaterialShapes.Cookie9Sided.toShape())
+                    .clickable(onClickLabel = "Открыть аватар", onClick = onAvatarClick),
+                contentAlignment = Alignment.Center,
+            ) {
                 Box(
                     Modifier
                         .matchParentSize()

@@ -205,68 +205,80 @@ fun VideoNoteView(media: MediaItem, viewModel: ChatViewModel, full: FileState) {
     val buttonCorner by animateDpAsState(if (playing) 24.dp else 12.dp, cornerSpec, label = "roundButtonCorner")
     val overlayAlpha by animateFloatAsState(if (playing) 0f else 1f, fadeSpec, label = "roundOverlayAlpha")
 
-    Box(
-        Modifier
-            .size(200.dp)
-            .clip(CircleShape)
-            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-            .clickable {
-                val path = full.path
-                when {
-                    playing -> playing = false
-                    path != null -> {
-                        AudioPlayback.stop()
-                        playing = true
-                    }
-                    !full.active -> viewModel.download(media.fileId, 16)
-                }
-            },
-        contentAlignment = Alignment.Center,
-    ) {
-        mini?.let { Image(it, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
-        previewBitmap?.let { Image(it, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
-        val path = full.path
-        if (playing && path != null) {
-            RoundVideoPlayer(path = path, onEnded = { playing = false })
+    Box(contentAlignment = Alignment.Center) {
+        if (playing || full.active) {
+            app.yougram.core.ui.component.WavyCircleRing(
+                modifier = Modifier.size(214.dp),
+                mainArcColor = MaterialTheme.colorScheme.primary,
+                wavySegmentColor = MaterialTheme.colorScheme.tertiary,
+                strokeWidth = 4.dp,
+                waveAmplitude = 5.dp,
+                animating = true,
+            )
         }
         Box(
             Modifier
-                .size(48.dp)
-                .graphicsLayer {
-                    alpha = overlayAlpha
-                    val s = 0.7f + 0.3f * overlayAlpha
-                    scaleX = s
-                    scaleY = s
-                }
-                .clip(RoundedCornerShape(buttonCorner.coerceAtLeast(0.dp)))
-                .background(Color.Black.copy(alpha = 0.5f)),
+                .size(200.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                .clickable {
+                    val path = full.path
+                    when {
+                        playing -> playing = false
+                        path != null -> {
+                            AudioPlayback.stop()
+                            playing = true
+                        }
+                        !full.active -> viewModel.download(media.fileId, 16)
+                    }
+                },
             contentAlignment = Alignment.Center,
         ) {
-            val st = when {
-                full.active -> 0
-                playing -> 1
-                else -> 2
+            mini?.let { Image(it, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
+            previewBitmap?.let { Image(it, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
+            val path = full.path
+            if (playing && path != null) {
+                RoundVideoPlayer(path = path, onEnded = { playing = false })
             }
-            Crossfade(targetState = st, animationSpec = fadeSpec, label = "roundIcon") { s ->
-                when (s) {
-                    0 -> LoadingIndicator(Modifier.size(36.dp), color = Color.White)
-                    1 -> Icon(Icons.Filled.Pause, null, tint = Color.White, modifier = Modifier.size(28.dp))
-                    else -> Icon(Icons.Filled.PlayArrow, null, tint = Color.White, modifier = Modifier.size(32.dp))
+            Box(
+                Modifier
+                    .size(48.dp)
+                    .graphicsLayer {
+                        alpha = overlayAlpha
+                        val s = 0.7f + 0.3f * overlayAlpha
+                        scaleX = s
+                        scaleY = s
+                    }
+                    .clip(RoundedCornerShape(buttonCorner.coerceAtLeast(0.dp)))
+                    .background(Color.Black.copy(alpha = 0.5f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                val st = when {
+                    full.active -> 0
+                    playing -> 1
+                    else -> 2
+                }
+                Crossfade(targetState = st, animationSpec = fadeSpec, label = "roundIcon") { s ->
+                    when (s) {
+                        0 -> LoadingIndicator(Modifier.size(36.dp), color = Color.White)
+                        1 -> Icon(Icons.Filled.Pause, null, tint = Color.White, modifier = Modifier.size(28.dp))
+                        else -> Icon(Icons.Filled.PlayArrow, null, tint = Color.White, modifier = Modifier.size(32.dp))
+                    }
                 }
             }
+            Text(
+                formatDuration(media.duration),
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .graphicsLayer { alpha = overlayAlpha }
+                    .padding(bottom = 14.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Color.Black.copy(alpha = 0.5f))
+                    .padding(horizontal = 8.dp, vertical = 2.dp),
+                style = MaterialTheme.typography.labelSmall,
+                color = Color.White,
+            )
         }
-        Text(
-            formatDuration(media.duration),
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .graphicsLayer { alpha = overlayAlpha }
-                .padding(bottom = 14.dp)
-                .clip(RoundedCornerShape(10.dp))
-                .background(Color.Black.copy(alpha = 0.5f))
-                .padding(horizontal = 8.dp, vertical = 2.dp),
-            style = MaterialTheme.typography.labelSmall,
-            color = Color.White,
-        )
     }
 }
 

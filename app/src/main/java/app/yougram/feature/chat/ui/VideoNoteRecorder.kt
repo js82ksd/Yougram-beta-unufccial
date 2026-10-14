@@ -208,22 +208,32 @@ fun VideoNoteRecorderDialog(
                 Modifier.align(Alignment.Center),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Box(
-                    Modifier
-                        .size(280.dp)
-                        .clip(CircleShape)
-                        .border(3.dp, if (recordingState) MaterialTheme.colorScheme.error else Color.White.copy(alpha = 0.4f), CircleShape),
-                ) {
-                    AndroidView(
-                        modifier = Modifier.fillMaxSize(),
-                        factory = { ctx ->
-                            PreviewView(ctx).apply {
-                                implementationMode = PreviewView.ImplementationMode.COMPATIBLE
-                                scaleType = PreviewView.ScaleType.FILL_CENTER
-                                previewView = this
-                            }
-                        },
+                Box(contentAlignment = Alignment.Center) {
+                    app.yougram.core.ui.component.WavyCircleRing(
+                        modifier = Modifier.size(298.dp),
+                        mainArcColor = if (recordingState) MaterialTheme.colorScheme.error else Color.White.copy(alpha = 0.8f),
+                        wavySegmentColor = if (recordingState) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary,
+                        strokeWidth = 4.dp,
+                        waveAmplitude = 5.dp,
+                        animating = true,
                     )
+                    Box(
+                        Modifier
+                            .size(280.dp)
+                            .clip(CircleShape)
+                            .border(2.dp, if (recordingState) MaterialTheme.colorScheme.error else Color.White.copy(alpha = 0.4f), CircleShape),
+                    ) {
+                        AndroidView(
+                            modifier = Modifier.fillMaxSize(),
+                            factory = { ctx ->
+                                PreviewView(ctx).apply {
+                                    implementationMode = PreviewView.ImplementationMode.COMPATIBLE
+                                    scaleType = PreviewView.ScaleType.FILL_CENTER
+                                    previewView = this
+                                }
+                            },
+                        )
+                    }
                 }
                 if (advanced && camera.zoomSlider) {
                     Spacer(Modifier.height(12.dp))

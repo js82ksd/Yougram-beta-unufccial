@@ -223,12 +223,26 @@ fun SettingsHomeScreen(
                 else Toast.makeText(context, "Не удалось прочитать изображение", Toast.LENGTH_SHORT).show()
             }
         }
+        var showAvatars by remember { mutableStateOf(false) }
+        val changeAvatar = { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }
+        if (showAvatars && state.avatars.isNotEmpty()) {
+            app.yougram.feature.chat.ui.PhotoViewer(
+                items = state.avatars,
+                startIndex = 0,
+                fileState = { viewModel.fileState(it) },
+                download = { id, priority -> viewModel.download(id, priority) },
+                onDismiss = { showAvatars = false },
+                allowSave = true,
+            )
+        }
         ProfileHeader(
             state = state,
             viewModel = viewModel,
             accountManager = accountManager,
             settings = settings,
-            onChangeAvatar = { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+            // Тап по аватару — просмотр (если фото нет, сразу выбор нового), значок камеры — смена.
+            onOpenAvatar = { if (state.avatars.isNotEmpty()) showAvatars = true else changeAvatar() },
+            onChangeAvatar = changeAvatar,
             onOpenAccountManager = openAccountManager,
         )
 
@@ -345,6 +359,7 @@ private fun ProfileHeader(
     viewModel: SettingsHomeViewModel,
     accountManager: AccountManager,
     settings: SettingsRepository,
+    onOpenAvatar: () -> Unit,
     onChangeAvatar: () -> Unit,
     onOpenAccountManager: () -> Unit,
 ) {
@@ -367,7 +382,7 @@ private fun ProfileHeader(
                 Modifier
                     .size(116.dp)
                     .clip(CircleShape)
-                    .clickable(role = Role.Button, onClickLabel = "Изменить аватар", onClick = onChangeAvatar),
+                    .clickable(role = Role.Button, onClickLabel = "Открыть аватар", onClick = onOpenAvatar),
                 contentAlignment = Alignment.Center,
             ) {
                 Box(
@@ -387,7 +402,8 @@ private fun ProfileHeader(
                         .align(Alignment.BottomEnd)
                         .size(32.dp)
                         .clip(CircleShape)
-                        .background(scheme.primary),
+                        .background(scheme.primary)
+                        .clickable(role = Role.Button, onClickLabel = "Изменить аватар", onClick = onChangeAvatar),
                     contentAlignment = Alignment.Center,
                 ) {
                     if (state.avatarUpdating) {
@@ -610,6 +626,8 @@ data class SettingsHomeState(
     val profile: ProfileItem? = null,
     val devices: Int? = null,
     val avatarUpdating: Boolean = false,
+    /** Мои аватарки (от новых к старым) для просмотра и скачивания. */
+    val avatars: List<app.yougram.feature.chat.data.MediaItem> = emptyList(),
     val error: String? = null,
 )
 
@@ -626,6 +644,7 @@ class SettingsHomeViewModel(private val repository: ChatRepository) : ViewModel(
                 _state.update { it.copy(error = e.message) }
             }
         }
+        refreshAvatars()
         viewModelScope.launch {
             val count = repository.activeSessionsCount()
             _state.update { it.copy(devices = count) }
@@ -638,6 +657,7 @@ class SettingsHomeViewModel(private val repository: ChatRepository) : ViewModel(
             try {
                 val profile = repository.setProfilePhoto(path)
                 _state.update { it.copy(profile = profile, avatarUpdating = false) }
+                refreshAvatars()
             } catch (e: Exception) {
                 _state.update { it.copy(avatarUpdating = false, error = e.message) }
             } finally {
@@ -657,6 +677,15 @@ class SettingsHomeViewModel(private val repository: ChatRepository) : ViewModel(
     }
 
     fun fileState(fileId: Int): Flow<FileState> = repository.fileState(fileId)
+
+    fun download(fileId: Int, priority: Int = 8) = repository.download(fileId, priority)
+
+    private fun refreshAvatars() {
+        viewModelScope.launch {
+            val list = runCatching { repository.ownAvatarHistory() }.getOrDefault(emptyList())
+            _state.update { it.copy(avatars = list) }
+        }
+    }
 
     companion object {
         fun factory(repository: ChatRepository): ViewModelProvider.Factory = viewModelFactory {

@@ -9,13 +9,20 @@ import dev.g000sha256.tdl.dto.CallServerTypeWebrtc
 import dev.g000sha256.tdl.dto.CallStateReady
 import org.telegram.messenger.voip.Instance
 import org.telegram.messenger.voip.NativeInstance
+import org.telegram.messenger.voip.VideoCapturerDevice
+import org.webrtc.Camera2Capturer
+import org.webrtc.Camera2Enumerator
+import org.webrtc.CameraVideoCapturer
+import org.webrtc.CapturerObserver
+import org.webrtc.SurfaceTextureHelper
+import org.webrtc.VideoFrame
+import org.webrtc.VideoSink
 import java.io.File
 import java.util.concurrent.Executors
 
 /**
  * Медиа-движок 1:1 звонков на родном tgcalls из Telegram-Android.
- * Сигнализацию и ключ даёт TDLib. Контракт тот же, что у прежнего движка:
- * все нативные start/stop идут по порядку через один поток, запоздавшие колбэки старой сессии игнорируются.
+ * Сигнализацию и ключ даёт TDLib.
  */
 class TgCallsEngine(context: Context) : CallEngine {
 
@@ -43,12 +50,18 @@ class TgCallsEngine(context: Context) : CallEngine {
 
     @Volatile private var session: Session? = null
     @Volatile private var muted = false
+    @Volatile private var cameraCapturer: CameraVideoCapturer? = null
+    @Volatile private var surfaceTextureHelper: SurfaceTextureHelper? = null
+
+    @Volatile var remoteVideoSink: VideoSink? = null
+    @Volatile var localVideoSink: VideoSink? = null
 
     /** Пакеты, пришедшие раньше, чем стартовал движок. */
     private val earlyLock = Any()
     private val early = ArrayDeque<ByteArray>()
 
     override val isAvailable: Boolean = true
+    override val supportsVideo: Boolean = true
 
     override val protocol: CallProtocol?
         get() = runCatching {
@@ -75,10 +88,10 @@ class TgCallsEngine(context: Context) : CallEngine {
         }
         val previous = session
         session = s
-        CallLog.d(TAG, "start user=$userId outgoing=$isOutgoing")
+        CallLog.d(TAG, "start user=$userId outgoing=$isOutgoing isVideo=$isVideo")
         worker.execute {
             previous?.release()
-            if (session === s) connect(s, state, isOutgoing, sendSignaling, onLink) else s.release()
+            if (session === s) connect(s, state, isOutgoing, isVideo, sendSignaling, onLink) else s.release()
         }
     }
 
@@ -86,11 +99,16 @@ class TgCallsEngine(context: Context) : CallEngine {
         s: Session,
         state: CallStateReady,
         isOutgoing: Boolean,
+        isVideo: Boolean,
         sendSignaling: (ByteArray) -> Unit,
         onLink: (EngineLink) -> Unit,
     ) {
         try {
             initWebrtcContext()
+
+            if (isVideo) {
+                setupCamera(isFront = true)
+            }
 
             val reflectorIds = state.servers
                 .filter { it.type is CallServerTypeTelegramReflector }
@@ -115,7 +133,7 @@ class TgCallsEngine(context: Context) : CallEngine {
             val config = Instance.Config(
                 30.0, 10.0, Instance.DATA_SAVING_NEVER,
                 state.allowP2p,
-                true, true, true, false, false,
+                true, true, true, isVideo, false,
                 File(logDir, "call.log").absolutePath,
                 File(logDir, "call_stats.log").absolutePath,
                 state.protocol.maxLayer,
@@ -146,7 +164,6 @@ class TgCallsEngine(context: Context) : CallEngine {
             instance.setOnSignalDataListener { data -> if (session === s) sendSignaling(data) }
             instance.setMuteMicrophone(muted)
 
-            // Пакеты, пришедшие за время подключения, уходят по порядку, и только потом движок «активен».
             synchronized(s.lock) {
                 if (session !== s) return@synchronized
                 while (s.pending.isNotEmpty()) {
@@ -161,6 +178,46 @@ class TgCallsEngine(context: Context) : CallEngine {
             CallLog.e(TAG, "start failed", e)
             s.release()
             if (session === s) onLink(EngineLink.FAILED)
+        }
+    }
+
+    fun setupCamera(isFront: Boolean) {
+        runCatching {
+            val enumerator = Camera2Enumerator(app)
+            val deviceNames = enumerator.deviceNames
+            val selectedDevice = deviceNames.firstOrNull { enumerator.isFrontFacing(it) == isFront }
+                ?: deviceNames.firstOrNull() ?: return
+
+            cameraCapturer?.stopCapture()
+            cameraCapturer?.dispose()
+
+            val eglContext = VideoCapturerDevice.getSharedEGLContext()
+            surfaceTextureHelper = SurfaceTextureHelper.create("TgCameraThread", eglContext)
+            val capturer = Camera2Capturer(app, selectedDevice, null)
+            cameraCapturer = capturer
+
+            capturer.initialize(surfaceTextureHelper, app, object : CapturerObserver {
+                override fun onCapturerStarted(success: Boolean) {}
+                override fun onCapturerStopped() {}
+                override fun onFrameCaptured(frame: VideoFrame) {
+                    localVideoSink?.onFrame(frame)
+                }
+            })
+            capturer.startCapture(1280, 720, 30)
+        }.onFailure { CallLog.e(TAG, "setupCamera failed", it) }
+    }
+
+    fun switchCamera() {
+        cameraCapturer?.switchCamera(null)
+    }
+
+    fun stopCamera() {
+        runCatching {
+            cameraCapturer?.stopCapture()
+            cameraCapturer?.dispose()
+            cameraCapturer = null
+            surfaceTextureHelper?.dispose()
+            surfaceTextureHelper = null
         }
     }
 
@@ -191,6 +248,7 @@ class TgCallsEngine(context: Context) : CallEngine {
 
     override fun stop() {
         CallLog.d(TAG, "stop")
+        stopCamera()
         val s = session
         session = null
         muted = false
@@ -198,11 +256,12 @@ class TgCallsEngine(context: Context) : CallEngine {
         if (s != null) worker.execute { s.release() }
     }
 
-    /** org.webrtc.ContextUtils приходит вместе с нативной сборкой tgcalls; через рефлексию проект собирается и без неё. */
     private fun initWebrtcContext() {
-        Class.forName("org.webrtc.ContextUtils")
-            .getMethod("initialize", Context::class.java)
-            .invoke(null, app)
+        runCatching {
+            Class.forName("org.webrtc.ContextUtils")
+                .getMethod("initialize", Context::class.java)
+                .invoke(null, app)
+        }
     }
 
     private fun networkType(): Int {

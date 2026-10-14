@@ -149,6 +149,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextRange
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -291,6 +292,8 @@ fun ChatScreen(
     }
     var input by inputHolder
     var commandsOpen by remember { mutableStateOf(false) }
+    // Упоминания людей без username: «@Имя» → id (уходят в сообщение как сущности).
+    val mentionIds = remember { mutableStateMapOf<String, Long>() }
     var viewerMedia by remember { mutableStateOf<MediaItem?>(null) }
     var actionMessage by remember { mutableStateOf<MessageItem?>(null) }
     var replyTo by remember { mutableStateOf<MessageItem?>(null) }
@@ -378,7 +381,8 @@ fun ChatScreen(
             stopEditing()
         } else {
             haptics(app.yougram.core.ui.Haptics.Kind.Confirm)
-            viewModel.send(input, replyTo?.id)
+            viewModel.send(input, replyTo?.id, mentionIds.filterKeys { input.contains(it) })
+            mentionIds.clear()
             replyTo = null
             input = ""
         }
@@ -592,6 +596,22 @@ fun ChatScreen(
         }.collect { nearTop -> if (nearTop) viewModel.loadOlder() }
     }
 
+    // Подсказка упоминания: слово «@…» перед курсором.
+    val mentionToken = remember(inputHolder.value.text, inputHolder.value.selection, editing) {
+        val v = inputHolder.value
+        if (!v.selection.collapsed || editing != null) null
+        else Regex("(?:^|\\s)@([\\p{L}\\p{N}_]*)$").find(v.text.substring(0, v.selection.start))
+            ?.let { it.groups[1]!!.range.first - 1 to it.groupValues[1] }
+    }
+    var mentionResults by remember { mutableStateOf(emptyList<app.yougram.feature.chat.data.ChatRepository.MentionCandidate>()) }
+    LaunchedEffect(mentionToken?.second, mentionToken != null) {
+        val q = mentionToken?.second
+        if (q == null) { mentionResults = emptyList(); return@LaunchedEffect }
+        if (q.isNotEmpty()) delay(150)
+        mentionResults = viewModel.searchMentions(q)
+    }
+    val shownMentions = if (mentionToken != null) mentionResults else emptyList()
+
     // Список команд бота для подсказки (по кнопке-меню или при вводе «/»).
     val typedCommand = input.startsWith("/") && !input.contains(' ') && !input.contains('\n')
     val shownCommands = when {
@@ -709,6 +729,57 @@ fun ChatScreen(
                         item(key = "older-loader") {
                             Box(Modifier.fillMaxWidth().padding(8.dp), contentAlignment = Alignment.Center) {
                                 LoadingIndicator(Modifier.size(24.dp))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Подсказки упоминания: «@» + начало имени, список участников группы над полем ввода.
+        run {
+            var lastMentions by remember { mutableStateOf(emptyList<app.yougram.feature.chat.data.ChatRepository.MentionCandidate>()) }
+            if (shownMentions.isNotEmpty()) lastMentions = shownMentions
+            val plates = LocalPlates.current
+            val mentionGlass = remember(glass.blurRadius, glass.blurType, plates.commands) {
+                glass.copy(opacity = (1f - plates.commands).coerceIn(0f, 1f))
+            }
+            androidx.compose.animation.AnimatedVisibility(
+                visible = shownMentions.isNotEmpty(),
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(start = 12.dp, end = 12.dp, bottom = bottomBarHeight + 4.dp)
+                    .fillMaxWidth(),
+                enter = fadeIn(fadeSpec) + slideInVertically(slideSpec) { it / 4 },
+                exit = fadeOut(fadeSpec) + slideOutVertically(slideSpec) { it / 5 },
+            ) {
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .glass(backdrop, mentionGlass, MaterialTheme.shapes.large, tint = MaterialTheme.colorScheme.surfaceContainerHigh),
+                ) {
+                    LazyColumn(Modifier.heightIn(max = 260.dp)) {
+                        itemsIndexed(lastMentions, key = { _, m -> m.userId }) { _, m ->
+                            Column(
+                                Modifier
+                                    .animateItem()
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        val token = mentionToken ?: return@clickable
+                                        val v = inputHolder.value
+                                        val label = if (m.username != null) "@${m.username}" else "@${m.name}"
+                                        if (m.username == null) mentionIds[label] = m.userId
+                                        val cursor = v.selection.start
+                                        val newText = v.text.substring(0, token.first) + label + " " + v.text.substring(cursor)
+                                        val pos = token.first + label.length + 1
+                                        inputHolder.value = TextFieldValue(newText, TextRange(pos))
+                                    }
+                                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                            ) {
+                                Text(m.name, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                if (m.username != null) {
+                                    Text("@" + m.username, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                                }
                             }
                         }
                     }

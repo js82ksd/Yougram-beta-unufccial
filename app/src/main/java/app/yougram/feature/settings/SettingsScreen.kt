@@ -1,6 +1,16 @@
 package app.yougram.feature.settings
 
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import app.yougram.feature.main.ui.MainTab
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -62,6 +72,49 @@ fun SettingsScreen(settings: SettingsRepository, plates: PlateRepository, conten
         }
         SettingsFootnote("Предпросмотр показывает размытие по Гауссу, выбранный тип применяется к самим панелям.")
 
+        NavOrderSection(settings)
+
         PlateSection(plates)
     }
+}
+/** Порядок вкладок нижней панели навигации: стрелки вверх/вниз у каждой вкладки. */
+@Composable
+private fun NavOrderSection(settings: SettingsRepository) {
+    val raw by settings.navOrder.collectAsState()
+    val order = MainTab.parseOrder(raw)
+    fun move(i: Int, dir: Int) {
+        val j = i + dir
+        if (j !in order.indices) return
+        val next = order.toMutableList().apply { val t = this[i]; this[i] = this[j]; this[j] = t }
+        settings.setNavOrder(MainTab.serializeOrder(next))
+    }
+    SectionLabel("Порядок вкладок навбара")
+    SettingGroup {
+        order.forEachIndexed { i, tab ->
+            item {
+                SettingRow(
+                    title = tab.title,
+                    icon = tab.icon,
+                    trailing = {
+                        Row {
+                            IconButton(onClick = { move(i, -1) }, enabled = i > 0, modifier = Modifier.size(40.dp)) {
+                                Icon(Icons.Filled.KeyboardArrowUp, "${tab.title}: выше")
+                            }
+                            IconButton(onClick = { move(i, 1) }, enabled = i < order.lastIndex, modifier = Modifier.size(40.dp)) {
+                                Icon(Icons.Filled.KeyboardArrowDown, "${tab.title}: ниже")
+                            }
+                        }
+                    },
+                )
+            }
+        }
+        item {
+            SettingRow(
+                title = "Сбросить порядок",
+                subtitle = "Контакты, Звонки, Чаты, Настройки",
+                onClick = { settings.setNavOrder(null) },
+            )
+        }
+    }
+    SettingsFootnote("Вкладки нижней панели отображаются слева направо в выбранном порядке.")
 }

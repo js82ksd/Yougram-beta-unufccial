@@ -19,6 +19,12 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Download
+import android.widget.Toast
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.platform.LocalContext
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import app.yougram.core.ui.component.LoadingIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -75,7 +81,11 @@ fun PhotoViewer(
     fileState: (Int) -> kotlinx.coroutines.flow.Flow<FileState>,
     download: (Int, Int) -> Unit,
     onDismiss: () -> Unit,
+    /** Показывать кнопку «Скачать» (сохраняет текущее фото в галерею). */
+    allowSave: Boolean = false,
 ) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val pagerState = rememberPagerState(initialPage = startIndex.coerceIn(0, (items.size - 1).coerceAtLeast(0))) { items.size }
     var zoomed by remember { mutableStateOf(false) }
     val backdrop = rememberBackdropState()
@@ -130,6 +140,31 @@ fun PhotoViewer(
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(Icons.Filled.Close, contentDescription = "Закрыть", tint = Color.White)
+            }
+            if (allowSave) {
+                Box(
+                    Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 6.dp, end = 12.dp)
+                        .size(40.dp)
+                        .glass(backdrop, ViewerGlass, CircleShape, Color.Black)
+                        .clickable {
+                            val media = items.getOrNull(pagerState.currentPage) ?: return@clickable
+                            scope.launch {
+                                val path = fileState(media.fileId).first().path
+                                if (path == null) {
+                                    download(media.fileId, 32)
+                                    Toast.makeText(context, "Фото ещё загружается, попробуйте позже", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    val ok = saveToGallery(context, path, media.name, media.mimeType, media.kind)
+                                    Toast.makeText(context, if (ok) "Сохранено в галерею" else "Не удалось сохранить", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Filled.Download, contentDescription = "Скачать", tint = Color.White)
+                }
             }
         }
     }

@@ -8,6 +8,7 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import app.yougram.feature.chat.data.ChatRepository
 import app.yougram.feature.chat.data.FileState
 import app.yougram.feature.chat.data.GroupPerms
+import app.yougram.feature.chat.data.MediaItem
 import app.yougram.feature.chat.data.MessageItem
 import app.yougram.feature.chat.data.ProfileDetails
 import app.yougram.feature.chat.data.UserDossier
@@ -26,6 +27,8 @@ data class ProfileUiState(
     val shared: List<MessageItem> = emptyList(),
     val sharedLoading: Boolean = true,
     val deleted: List<MessageItem> = emptyList(),
+    /** Все аватарки профиля (от новых к старым) для просмотра и скачивания. */
+    val avatars: List<MediaItem> = emptyList(),
     val error: String? = null,
     val left: Boolean = false,
 )
@@ -43,6 +46,10 @@ class ProfileViewModel(
         viewModelScope.launch {
             val items = runCatching { repository.deletedMessages(chatId) }.getOrDefault(emptyList())
             _state.update { it.copy(deleted = items) }
+        }
+        viewModelScope.launch {
+            val avatars = runCatching { repository.avatarHistory(chatId) }.getOrDefault(emptyList())
+            _state.update { it.copy(avatars = avatars) }
         }
         viewModelScope.launch {
             val items = runCatching { repository.sharedMessages(chatId) }.getOrDefault(emptyList())

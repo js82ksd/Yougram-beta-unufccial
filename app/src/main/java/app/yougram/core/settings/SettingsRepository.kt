@@ -325,6 +325,15 @@ class SettingsRepository(private val context: Context) {
         prefs.edit().putString(KEY_HOME_LAYOUT, json).apply()
     }
 
+    /** Порядок вкладок нижней панели: имена MainTab через запятую; null — по умолчанию. */
+    private val _navOrder = MutableStateFlow(prefs.getString(KEY_NAV_ORDER, null))
+    val navOrder: StateFlow<String?> = _navOrder.asStateFlow()
+
+    fun setNavOrder(value: String?) {
+        _navOrder.value = value
+        prefs.edit().putString(KEY_NAV_ORDER, value).apply()
+    }
+
     fun resetGlass() {
         setBlur(GlassSettings.DEFAULT_BLUR)
         setOpacity(GlassSettings.DEFAULT_OPACITY)
@@ -739,6 +748,7 @@ class SettingsRepository(private val context: Context) {
         const val KEY_OPACITY = "glass_opacity"
         const val KEY_BLUR_TYPE = "glass_blur_type"
         const val KEY_HOME_LAYOUT = "home_layout"
+        const val KEY_NAV_ORDER = "nav_order"
         const val KEY_MODE = "theme_mode"
         const val KEY_DYNAMIC = "theme_dynamic"
         const val KEY_ACCENT = "theme_accent"

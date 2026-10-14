@@ -579,12 +579,15 @@ class ChatViewModel(
     fun forward(messageId: Long, toChatId: Long) =
         action("Сообщение переслано") { repository.forwardMessage(toChatId, chatId, messageId) }
 
-    fun send(text: String, replyToId: Long? = null) {
+    /** Участники группы для подсказки упоминания «@». */
+    suspend fun searchMentions(query: String) = repository.searchMentions(chatId, query)
+
+    fun send(text: String, replyToId: Long? = null, mentions: Map<String, Long> = emptyMap()) {
         val trimmed = text.trim()
         if (trimmed.isEmpty()) return
         viewModelScope.launch {
             try {
-                repository.sendText(chatId, trimmed, replyToId)
+                repository.sendText(chatId, trimmed, replyToId, mentions = mentions)
                 // Режим призрака: сообщения читаем только когда пользователь сам что-то делает в чате.
                 if (settings.ghost.value.enabled && settings.ghost.value.readOnAction) {
                     val unread = _state.value.messages.filter { !it.isOutgoing }.take(50).map { it.id }

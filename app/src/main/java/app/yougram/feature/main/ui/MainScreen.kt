@@ -151,6 +151,19 @@ enum class MainTab(val title: String, val icon: ImageVector) {
     Calls("Звонки", Icons.Filled.Call),
     Chats("Чаты", Icons.Filled.ChatBubble),
     Settings("Настройки", Icons.Filled.Settings),
+    ;
+
+    companion object {
+        val DefaultOrder: List<MainTab> get() = entries.toList()
+
+        /** Порядок из сохранённой строки: неизвестные и повторы отбрасываются, недостающие вкладки добавляются в конец. */
+        fun parseOrder(saved: String?): List<MainTab> {
+            val parsed = saved?.split(',')?.mapNotNull { n -> entries.firstOrNull { it.name == n } }?.distinct().orEmpty()
+            return parsed + entries.filter { it !in parsed }
+        }
+
+        fun serializeOrder(order: List<MainTab>): String = order.joinToString(",") { it.name }
+    }
 }
 
 private val TopBarContentHeight = 56.dp
@@ -209,6 +222,8 @@ fun MainScreen(
     val chatPrefs by container.settings.chatPrefs.collectAsState()
     val backdrop = rememberBackdropState()
     val badgeOn by container.settings.badge.collectAsState()
+    val navOrderRaw by container.settings.navOrder.collectAsState()
+    val navOrder = remember(navOrderRaw) { MainTab.parseOrder(navOrderRaw) }
     val ownBanner by container.settings.banner.collectAsState()
     val badgeContext = LocalContext.current
     LaunchedEffect(badgeOn, ownBanner) {
@@ -589,6 +604,7 @@ fun MainScreen(
             )
         } else {
             GlassBottomBar(
+                order = navOrder,
                 selected = tab,
                 onSelect = {
                     selectTab(it)
@@ -905,7 +921,7 @@ private val NavPadHorizontal = 8.dp
  * фон плавно переходит между «залитым» и прозрачным. Слот вкладки 48 dp, зазор 2 dp.
  */
 @Composable
-private fun NavTabs(selected: MainTab, onSelect: (MainTab) -> Unit, chatsUnread: Int) {
+private fun NavTabs(order: List<MainTab>, selected: MainTab, onSelect: (MainTab) -> Unit, chatsUnread: Int) {
     val density = LocalDensity.current
     val measurer = rememberTextMeasurer()
     val labelStyle = MaterialTheme.typography.labelLargeEmphasized
@@ -914,7 +930,7 @@ private fun NavTabs(selected: MainTab, onSelect: (MainTab) -> Unit, chatsUnread:
         horizontalArrangement = Arrangement.spacedBy(NavGap),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        MainTab.entries.forEach { tab ->
+        order.forEach { tab ->
             // Дополнительная ширина под подпись: сама подпись + правый отступ 8 dp.
             val px = remember(tab, labelStyle) { measurer.measure(tab.title, labelStyle, maxLines = 1).size.width }
             val extra = with(density) { px.toDp() } + 8.dp
@@ -1013,6 +1029,7 @@ private fun NavTab(tab: MainTab, selected: Boolean, extra: Dp, style: TextStyle,
 
 @Composable
 private fun GlassBottomBar(
+    order: List<MainTab>,
     selected: MainTab,
     onSelect: (MainTab) -> Unit,
     onSearch: () -> Unit,
@@ -1043,7 +1060,7 @@ private fun GlassBottomBar(
                 .glass(backdrop, glass, CircleShape)
                 .clip(CircleShape),
         ) {
-            Box(Modifier.align(Alignment.Center)) { NavTabs(selected, onSelect, chatsUnread) }
+            Box(Modifier.align(Alignment.Center)) { NavTabs(order, selected, onSelect, chatsUnread) }
         }
 
         // Отдельная кнопка поиска справа, той же высоты, что и «таблетка».
