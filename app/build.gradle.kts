@@ -51,25 +51,11 @@ android {
             abiFilters += listOf("arm64-v8a", "armeabi-v7a")
         }
 
-        externalNativeBuild {
-            cmake {
-                cppFlags += listOf("-std=c++17", "-frtti", "-fexceptions")
-                arguments += listOf("-DANDROID_STL=c++_static", "-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON")
-            }
-        }
-
         buildConfigField(
             "String",
             "UPDATE_URL",
             "\"${localProps.getProperty("UPDATE_URL") ?: ""}\""
         )
-    }
-
-    externalNativeBuild {
-        cmake {
-            path = file("src/main/cpp/CMakeLists.txt")
-            version = "3.22.1"
-        }
     }
 
     signingConfigs {
@@ -121,6 +107,9 @@ kotlin {
 }
 
 dependencies {
+    // Нативный код (плагины, tgcalls/libyougram_voip) вынесен в модуль :cpp
+    implementation(project(":cpp"))
+
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)
 
