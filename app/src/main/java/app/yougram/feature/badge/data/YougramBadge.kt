@@ -12,6 +12,8 @@ object YougramBadge {
     const val CREATOR_MARKER = "⁠⁤⁠"
     const val CREATOR_USER_ID = 5558165896L
     val GOLD_USER_IDS = setOf(7160478740L, 6502820601L, 1472717379L, 5019526707L)
+    /** Id чатов/каналов со специальным (четвёртым) значком. Вписать id своего канала вместо заглушки. */
+    val CHANNEL_CHAT_IDS = setOf(-1003792943925L)
     const val BIO_LIMIT = 70
 
     private const val VERSION_LENGTH = 6

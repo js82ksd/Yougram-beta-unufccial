@@ -9,11 +9,16 @@ data class HomeSection(val title: String, val entries: List<String>)
 /** Раскладка вкладок главного экрана настроек: хранение в JSON и операции редактирования. */
 object HomeLayout {
     val Default = listOf(
-        HomeSection("Yougram", listOf("appearance", "extras", "plugins", "power")),
-        HomeSection("Аккаунт и защита", listOf("account", "privacy", "security", "devices")),
-        HomeSection("Чаты", listOf("createGroup", "createChannel", "chatSettings", "folders", "archive", "notifications")),
-        HomeSection("Данные и язык", listOf("data", "language")),
+        HomeSection("Yougram", listOf("appearance", "client", "plugins")),
+        HomeSection("Аккаунт и защита", listOf("account", "security", "devices")),
+        HomeSection("Чаты", listOf("create", "archive", "notifications")),
+        HomeSection("Система", listOf("system")),
         HomeSection("Telegram", listOf("telegram")),
+    )
+
+    /** Id вкладок старой раскладки: если они есть в сохранённом JSON, раскладка сбрасывается на новую по умолчанию. */
+    private val LegacyIds = setOf(
+        "extras", "power", "privacy", "createGroup", "createChannel", "chatSettings", "folders", "data", "language",
     )
 
     fun parse(json: String?): List<HomeSection> {
@@ -25,7 +30,7 @@ object HomeLayout {
                 val e = o.getJSONArray("e")
                 HomeSection(o.getString("t"), List(e.length()) { k -> e.getString(k) })
             }
-        }.getOrNull()?.takeIf { it.isNotEmpty() } ?: Default
+        }.getOrNull()?.takeIf { l -> l.isNotEmpty() && l.none { sec -> sec.entries.any { it in LegacyIds } } } ?: Default
     }
 
     fun toJson(layout: List<HomeSection>): String = JSONArray().apply {
@@ -36,7 +41,7 @@ object HomeLayout {
 
     /** Убирает неизвестные и повторяющиеся вкладки; вкладки, которых нет в раскладке (новые), добавляет в конец. */
     /** Куда вставлять новые вкладки в уже сохранённой раскладке: перед указанной вкладкой. */
-    private val Anchors = mapOf("createGroup" to "chatSettings", "createChannel" to "chatSettings")
+    private val Anchors = emptyMap<String, String>()
 
     fun normalize(layout: List<HomeSection>, allIds: List<String>): List<HomeSection> {
         val known = allIds.toSet()

@@ -63,6 +63,7 @@ import java.io.File
 import kotlinx.coroutines.flow.flowOf
 
 private const val AnimationAutoLimit = 8L shl 20
+private const val VideoAutoLimit = 15L shl 20
 
 /** Медиа внутри пузыря: фото/видео/GIF/стикер с превью или строка документа. */
 @Composable
@@ -192,8 +193,15 @@ private fun VisualMedia(media: MediaItem, viewModel: ChatViewModel, full: FileSt
     LaunchedEffect(media.previewFileId) {
         media.previewFileId?.let { viewModel.download(it, 16) }
     }
+    // Фото и небольшие видео/анимации скачиваются сами, без нажатия.
+    val autoLoad = when (media.kind) {
+        MediaKind.PHOTO -> true
+        MediaKind.ANIMATION -> media.size in 1..AnimationAutoLimit
+        MediaKind.VIDEO -> media.size in 1..VideoAutoLimit
+        else -> false
+    }
     LaunchedEffect(media.fileId) {
-        if (media.kind == MediaKind.ANIMATION && media.size in 1..AnimationAutoLimit) viewModel.download(media.fileId, 8)
+        if (autoLoad) viewModel.download(media.fileId, 8)
     }
     val mini = remember(media.miniThumb) {
         media.miniThumb?.let { BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap() }
@@ -210,7 +218,8 @@ private fun VisualMedia(media: MediaItem, viewModel: ChatViewModel, full: FileSt
     val gifPath = full.path.takeIf { isGif && !lowTierGif }
     // Пока полный файл не скачан, превью размыто. На слабом железе вместо blur показываем только крошечную миниатюру:
     // растянутая, она и так выглядит размытой.
-    val blurred = full.path == null
+    // Если медиа грузится само и превью уже есть — показываем его чётко, без размытия и значка загрузки.
+    val blurred = full.path == null && !(autoLoad && previewBitmap != null)
     val lowTier = app.yougram.core.ui.rememberDeviceTier() == app.yougram.core.ui.DeviceTier.Low
     val blurMod = if (blurred && !lowTier) Modifier.blur(24.dp) else Modifier
 

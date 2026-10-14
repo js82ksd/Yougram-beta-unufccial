@@ -79,7 +79,8 @@ fun SecurityScreen(appLock: AppLock, contentPadding: PaddingValues) {
     BackHandler(enabled = mode != null) { mode = null }
 
     val currentMode = mode
-    if (currentMode != null) {
+    val embedded = app.yougram.feature.settings.component.LocalEmbeddedPage.current
+    if (currentMode != null && !embedded) {
         SecurityFlow(
             appLock = appLock,
             mode = currentMode,
@@ -214,6 +215,24 @@ fun SecurityScreen(appLock: AppLock, contentPadding: PaddingValues) {
             },
             onDismiss = { showTimeout = false },
         )
+    }
+
+    // На объединённой странице ввод кода открывается поверх неё отдельным полноэкранным окном.
+    if (embedded && currentMode != null) {
+        androidx.compose.ui.window.Dialog(
+            onDismissRequest = { mode = null },
+            properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
+        ) {
+            androidx.compose.material3.Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                SecurityFlow(
+                    appLock = appLock,
+                    mode = currentMode,
+                    contentPadding = PaddingValues(top = 24.dp),
+                    onDone = { mode = null },
+                    onNext = { mode = it },
+                )
+            }
+        }
     }
 }
 

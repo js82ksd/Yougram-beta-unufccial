@@ -14,7 +14,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Archive
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.BatterySaver
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.CameraAlt
@@ -65,10 +67,10 @@ private class SearchEntry(
 
 /** Все страницы настроек, по которым ищет кнопка поиска, когда открыта вкладка «Настройки». */
 private val searchEntries = listOf(
-    SearchEntry("Настройки Yougram", "Тема, цвета, панели", Icons.Filled.Tune, SettingsPage.Appearance,
-        "внешний вид тема цвет акцент размытие блюр плотность панели стекло плашки иконка значок лаунчер неон классическая голубая зелёная"),
-    SearchEntry("Призрак, шпион, фильтры", "Скрытность и локальный архив", Icons.Filled.VisibilityOff, SettingsPage.Extras,
-        "режим призрака шпион удалённые сообщения архив"),
+    SearchEntry("Внешний вид и чаты", "Тема, панели, настройки чатов, папки", Icons.Filled.Tune, SettingsPage.Appearance,
+        "внешний вид тема цвет акцент размытие блюр плотность панели стекло плашки иконка значок лаунчер неон классическая голубая зелёная чаты размер текста анимации пузыри обои поиск сверху папки"),
+    SearchEntry("Настройки клиента", "Призрак, шпион, фильтры и др.", Icons.Filled.VisibilityOff, SettingsPage.Extras,
+        "режим призрака шпион удалённые сообщения архив клиент фильтры"),
     SearchEntry(SettingsPage.Ghost.title, null, Icons.Filled.VisibilityOff, SettingsPage.Ghost, "призрак скрытность"),
     SearchEntry(SettingsPage.Spy.title, null, Icons.Filled.VisibilityOff, SettingsPage.Spy, "шпион архив удалённые"),
     SearchEntry(SettingsPage.MessageFilters.title, null, Icons.Filled.VisibilityOff, SettingsPage.MessageFilters, "фильтр сообщений"),
@@ -78,16 +80,15 @@ private val searchEntries = listOf(
     SearchEntry("Плагины", "Плагины на C++", Icons.Filled.Extension, SettingsPage.Plugins, "плагин расширение ygplugin"),
     SearchEntry("Энергосбережение", "Экономия заряда", Icons.Filled.BatterySaver, SettingsPage.PowerSaving, "батарея заряд"),
     SearchEntry("Аккаунт", "Номер телефона, имя пользователя", Icons.Filled.Person, SettingsPage.Account, "телефон имя username профиль аватар"),
-    SearchEntry("Конфиденциальность", "Кто видит ваши данные", Icons.Filled.VpnKey, SettingsPage.Privacy, "приватность видимость номер"),
+    SearchEntry("Безопасность и конфиденциальность", "Пин-код, отпечаток, кто видит ваши данные", Icons.Filled.Lock, SettingsPage.Privacy, "приватность видимость номер пароль пин код биометрия отпечаток двухфакторная безопасность конфиденциальность"),
     SearchEntry(SettingsPage.Blocked.title, null, Icons.Filled.Block, SettingsPage.Blocked, "заблокированные блок"),
     SearchEntry(SettingsPage.Websites.title, null, Icons.Filled.Language, SettingsPage.Websites, "сайты вход авторизация"),
-    SearchEntry("Безопасность", "Пин-код, графический ключ, отпечаток", Icons.Filled.Lock, SettingsPage.Security, "пароль пин код биометрия отпечаток двухфакторная"),
     SearchEntry("Устройства", "Активные сеансы", Icons.Filled.Laptop, SettingsPage.Devices, "сеансы сессии"),
-    SearchEntry("Настройки чатов", "Размер текста, анимации", Icons.Filled.ChatBubble, SettingsPage.ChatSettings, "размер текста анимации пузыри обои поиск сверху"),
-    SearchEntry("Папки с чатами", "Сортировка чатов по папкам", Icons.Filled.Folder, SettingsPage.Folders, "папки"),
+    SearchEntry(SettingsPage.CreateHub.title, "Группа, канал, аккаунт", Icons.Filled.Add, SettingsPage.CreateHub, "создать добавить аккаунт группа канал"),
+    SearchEntry(SettingsPage.SystemHub.title, "Данные и память, язык, энергосбережение", Icons.Filled.Settings, SettingsPage.SystemHub, "система данные язык энергосбережение"),
     SearchEntry("Создать группу", "Новая группа с участниками", Icons.Filled.Group, SettingsPage.CreateGroup, "создать группа чат участники новая"),
     SearchEntry("Создать канал", "Публичный или приватный", Icons.Filled.Campaign, SettingsPage.CreateChannel, "создать канал новый паблик подписчики"),
-    SearchEntry("Архив", "Архивные чаты", Icons.Filled.Archive, SettingsPage.Archive, "архив архивные чаты"),
+    SearchEntry("Архивы", "Архивные чаты", Icons.Filled.Archive, SettingsPage.Archive, "архив архивные чаты"),
     SearchEntry("Уведомления", "Звуки, сигналы, бейджи", Icons.Filled.Notifications, SettingsPage.Notifications, "звук сигнал бейдж вибрация"),
     SearchEntry("Данные и память", "Кэш, автозагрузка медиа", Icons.Filled.PieChart, SettingsPage.DataStorage, "кэш память автозагрузка медиа трафик"),
     SearchEntry("Язык", null, Icons.Filled.Language, SettingsPage.Language, "язык локализация"),

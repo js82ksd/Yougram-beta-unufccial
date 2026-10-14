@@ -34,7 +34,7 @@ val LocalCreatorUsers = compositionLocalOf { emptySet<Long>() }
 val LocalYougramBanners = compositionLocalOf { emptyMap<Long, YougramBanner>() }
 val LocalBadgeChecker = compositionLocalOf<(Long) -> Unit> { { } }
 
-enum class BadgeKind { NORMAL, GOLD, CREATOR }
+enum class BadgeKind { NORMAL, GOLD, CREATOR, CHANNEL }
 
 /** Значок приложения рядом с именем; рисуется если у [userId] найдена метка Yougram, золотая или синяя метка. */
 @Composable
@@ -47,12 +47,14 @@ fun YougramBadge(userId: Long, modifier: Modifier = Modifier, size: Dp = 16.dp) 
     var badgeKind by remember { mutableStateOf(BadgeKind.NORMAL) }
     LaunchedEffect(userId) { check(userId) }
 
+    val isChannel = userId in app.yougram.feature.badge.data.YougramBadge.CHANNEL_CHAT_IDS
     val isCreator = userId == app.yougram.feature.badge.data.YougramBadge.CREATOR_USER_ID || userId in creatorUsers
     val isGold = userId in app.yougram.feature.badge.data.YougramBadge.GOLD_USER_IDS || userId in goldUsers
     val isNormal = userId in users
 
-    if (isCreator || isGold || isNormal) {
+    if (isChannel || isCreator || isGold || isNormal) {
         val currentKind = when {
+            isChannel -> BadgeKind.CHANNEL
             isCreator -> BadgeKind.CREATOR
             isGold -> BadgeKind.GOLD
             else -> BadgeKind.NORMAL
@@ -60,6 +62,7 @@ fun YougramBadge(userId: Long, modifier: Modifier = Modifier, size: Dp = 16.dp) 
 
         // Значок рисуется своей PNG-картинкой для каждого вида метки, без подложки и обрезки.
         val badgeRes = when (currentKind) {
+            BadgeKind.CHANNEL -> R.drawable.ic_badge_channel
             BadgeKind.CREATOR -> R.drawable.ic_badge_blue
             BadgeKind.GOLD -> R.drawable.ic_badge_gold
             BadgeKind.NORMAL -> R.drawable.ic_badge_normal
@@ -76,8 +79,9 @@ fun YougramBadge(userId: Long, modifier: Modifier = Modifier, size: Dp = 16.dp) 
             Image(
                 painter = painterResource(id = badgeRes),
                 contentDescription = when (currentKind) {
+                    BadgeKind.CHANNEL -> "Официальный канал Yougram"
                     BadgeKind.CREATOR -> "Создатель Yougram"
-                    BadgeKind.GOLD -> "Помощник Yougram"
+                    BadgeKind.GOLD -> "Разработчик Yougram"
                     BadgeKind.NORMAL -> "Пользователь Yougram"
                 },
                 contentScale = androidx.compose.ui.layout.ContentScale.Fit,
@@ -91,9 +95,10 @@ fun YougramBadge(userId: Long, modifier: Modifier = Modifier, size: Dp = 16.dp) 
             text = {
                 Text(
                     when (badgeKind) {
-                        BadgeKind.CREATOR -> "Этот человек создал клиент Yougram ❤️"
-                        BadgeKind.GOLD -> "Это человек помогал в развитии клиента❤️"
-                        BadgeKind.NORMAL -> "Это пользователь клиента Yougram ❤️"
+                        BadgeKind.CHANNEL -> "Официальный канал клиента Yougram ❤️"
+                        BadgeKind.CREATOR -> "Создатель Yougram ❤️"
+                        BadgeKind.GOLD -> "Разработчик клиента❤️"
+                        BadgeKind.NORMAL -> "Пользователь Yougram ❤️"
                     },
                 )
             },

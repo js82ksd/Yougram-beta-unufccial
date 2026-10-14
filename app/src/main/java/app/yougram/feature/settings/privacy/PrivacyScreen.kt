@@ -68,7 +68,6 @@ fun PrivacyScreen(
     onNavigate: (SettingsPage) -> Unit,
 ) {
     val state by viewModel.state.collectAsState()
-    val lock by appLock.settings.collectAsState()
     val prefs by settings.privacyPrefs.collectAsState()
     val context = LocalContext.current
     LaunchedEffect(Unit) {
@@ -98,14 +97,6 @@ fun PrivacyScreen(
                     icon = Icons.Filled.Timer,
                     value = sec.autoDeleteSeconds?.let(::autoDeleteLabel) ?: "…",
                     onClick = { dialog = PrivacyDialog.AutoDelete },
-                )
-            }
-            item {
-                SettingRow(
-                    "Код-пароль",
-                    icon = Icons.Filled.Lock,
-                    value = if (lock.type != LockType.None) "Вкл." else "Выкл.",
-                    onClick = { onNavigate(SettingsPage.Security) },
                 )
             }
             item {

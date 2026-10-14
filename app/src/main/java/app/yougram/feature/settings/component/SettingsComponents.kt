@@ -131,7 +131,7 @@ fun SectionLabel(text: String) {
     )
 }
 
-/** Плитка с иконкой: форма и цвет зависят от места в группе (на слабых устройствах — скруглённый квадрат). */
+/** Круглая плитка с иконкой; цвет зависит от места в группе. */
 @Composable
 private fun SettingIconTile(icon: ImageVector) {
     val scheme = MaterialTheme.colorScheme
@@ -146,12 +146,7 @@ private fun SettingIconTile(icon: ImageVector) {
         1 -> scheme.onTertiaryContainer
         else -> scheme.onSecondaryContainer
     }
-    val low = rememberDeviceTier() == DeviceTier.Low
-    // Каждая иконка в группе получает свою форму (по месту в группе), чтобы плитки не повторялись подряд.
-    val bag = LocalShapeBag.current
-    val shapeIndex = remember { bag?.next() ?: Random.nextInt(RandomShapeCount) }
-    val polygon = randomPolygonShape(shapeIndex)
-    val shape: Shape = if (low) RoundedCornerShape(16.dp) else polygon
+    val shape: Shape = androidx.compose.foundation.shape.CircleShape
     Box(
         Modifier.size(44.dp).clip(shape).background(container),
         contentAlignment = Alignment.Center,

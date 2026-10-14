@@ -41,17 +41,17 @@ import app.yougram.feature.settings.extras.SharedFiltersScreen
 import app.yougram.feature.settings.extras.SpyModeScreen
 import app.yougram.feature.settings.general.AccountScreen
 import app.yougram.feature.settings.general.ArchiveScreen
-import app.yougram.feature.settings.general.ChatSettingsScreen
 import app.yougram.feature.settings.general.CreateChatScreen
 import app.yougram.feature.settings.general.DataStorageScreen
-import app.yougram.feature.settings.general.FoldersScreen
 import app.yougram.feature.settings.general.LanguageScreen
 import app.yougram.feature.settings.general.NotificationsScreen
 import app.yougram.feature.settings.general.PowerSavingScreen
+import app.yougram.feature.settings.hub.AppearanceChatsScreen
+import app.yougram.feature.settings.hub.CreateHubScreen
+import app.yougram.feature.settings.hub.SecurityPrivacyScreen
+import app.yougram.feature.settings.hub.SystemHubScreen
 import app.yougram.feature.settings.privacy.BlockedScreen
 import app.yougram.feature.settings.privacy.DevicesScreen
-import app.yougram.feature.settings.privacy.PrivacyScreen
-import app.yougram.feature.settings.privacy.SecurityScreen
 import app.yougram.feature.settings.privacy.WebsitesScreen
 import app.yougram.feature.settings.telegram.BusinessScreen
 import app.yougram.feature.settings.telegram.GiftSheet
@@ -99,17 +99,14 @@ fun SettingsPageContent(
             onOpenChat = onOpenChat,
             onGift = { showGift = true },
         )
-        SettingsPage.Appearance -> SettingsScreen(container.settings, container.plates, contentPadding)
+        SettingsPage.Appearance -> AppearanceChatsScreen(container.settings, container.plates, details, contentPadding, onNavigate)
         SettingsPage.Account -> AccountScreen(details, container.accountManager, contentPadding)
-        SettingsPage.ChatSettings -> ChatSettingsScreen(container.settings, contentPadding, onNavigate)
-        SettingsPage.Privacy -> PrivacyScreen(details, container.appLock, container.settings, contentPadding, onNavigate)
+        SettingsPage.Privacy -> SecurityPrivacyScreen(details, container.appLock, container.settings, contentPadding, onNavigate)
         SettingsPage.Blocked -> BlockedScreen(details, contentPadding)
         SettingsPage.Websites -> WebsitesScreen(details, contentPadding)
-        SettingsPage.Security -> SecurityScreen(container.appLock, contentPadding)
         SettingsPage.Notifications -> NotificationsScreen(container.settings, contentPadding)
         SettingsPage.DataStorage -> DataStorageScreen(details, container.settings, contentPadding)
         SettingsPage.Plugins -> PluginsScreen(container.plugins, contentPadding)
-        SettingsPage.Folders -> FoldersScreen(details, contentPadding)
         SettingsPage.Archive -> ArchiveScreen(container.chatRepository, contentPadding, onOpenChat)
         SettingsPage.Devices -> DevicesScreen(details, contentPadding)
         SettingsPage.PowerSaving -> PowerSavingScreen(container.settings, contentPadding)
@@ -139,6 +136,8 @@ fun SettingsPageContent(
         }
         SettingsPage.Stars -> StarsScreen(contentPadding, onGift = { showGift = true })
         SettingsPage.Business -> BusinessScreen(contentPadding)
+        SettingsPage.CreateHub -> CreateHubScreen(container.accountManager, contentPadding, onNavigate)
+        SettingsPage.SystemHub -> SystemHubScreen(contentPadding, onNavigate)
     }
 
     if (showGift) {

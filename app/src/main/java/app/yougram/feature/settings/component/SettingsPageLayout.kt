@@ -40,9 +40,17 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 
+/** true, когда экран вложен в объединённую страницу настроек и не должен сам прокручиваться. */
+internal val LocalEmbeddedPage = androidx.compose.runtime.staticCompositionLocalOf { false }
+
 /** Общий каркас подэкрана настроек: прокрутка, отступы под панели и боковой отступ 12 dp. */
 @Composable
 internal fun SettingsPageColumn(contentPadding: PaddingValues, content: @Composable ColumnScope.() -> Unit) {
+    // Внутри объединённой страницы экран не прокручивается сам: прокрутку и отступы даёт внешняя колонка.
+    if (LocalEmbeddedPage.current) {
+        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) { content() }
+        return
+    }
     Column(
         modifier = Modifier
             .fillMaxSize()

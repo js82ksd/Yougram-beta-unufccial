@@ -30,7 +30,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Archive
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.BatterySaver
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.CardGiftcard
@@ -134,15 +136,12 @@ import kotlinx.coroutines.launch
 enum class SettingsPage(val title: String) {
     Home("Настройки"),
     HomeLayoutEditor("Порядок вкладок"),
-    Appearance("Внешний вид"),
+    Appearance("Внешний вид и чаты"),
     Account("Аккаунт"),
-    ChatSettings("Настройки чатов"),
-    Privacy("Конфиденциальность"),
-    Security("Безопасность"),
+    Privacy("Безопасность и конфиденциальность"),
     Notifications("Уведомления"),
     DataStorage("Данные и память"),
     Plugins("Плагины"),
-    Folders("Папки с чатами"),
     Archive("Архив"),
     Devices("Устройства"),
     PowerSaving("Энергосбережение"),
@@ -152,7 +151,7 @@ enum class SettingsPage(val title: String) {
     About("О приложении"),
     Blocked("Чёрный список"),
     Websites("Авторизованные сайты"),
-    Extras("Режим призрака и шпион"),
+    Extras("Настройки клиента"),
     Ghost("Режим призрака"),
     Spy("Шпион"),
     MessageFilters("Фильтры сообщений"),
@@ -163,12 +162,16 @@ enum class SettingsPage(val title: String) {
     Stars("Звёзды Telegram"),
     Business("Telegram для бизнеса"),
     TelegramHub("Telegram"),
+    CreateHub("Создать / Добавить"),
+    SystemHub("Система"),
     Update("Обновление");
 
     /** Страница, на которую ведёт «Назад». */
     val parent: SettingsPage
         get() = when (this) {
             Blocked, Websites -> Privacy
+            DataStorage, Language, PowerSaving -> SystemHub
+            CreateGroup, CreateChannel -> CreateHub
             Ghost, Spy, MessageFilters, Banner -> Extras
             SharedFilters, ShadowBan -> MessageFilters
             Premium, Stars, Business -> TelegramHub
@@ -317,22 +320,16 @@ internal class HomeEntry(
 
 /** Все вкладки главного экрана настроек; [devices] и [language] — значения справа у «Устройства» и «Язык». */
 internal fun homeEntries(devices: String?, language: String?): List<HomeEntry> = listOf(
-            HomeEntry("appearance", "Настройки Yougram", "Тема, цвета, панели", Icons.Filled.Tune, null, SettingsPage.Appearance),
-            HomeEntry("extras", "Призрак, шпион, фильтры", "Скрытность и локальный архив", Icons.Filled.VisibilityOff, null, SettingsPage.Extras),
+            HomeEntry("appearance", "Внешний вид и чаты", "Тема, панели, настройки чатов, папки", Icons.Filled.Tune, null, SettingsPage.Appearance),
+            HomeEntry("client", "Настройки клиента", "Призрак, шпион, фильтры и др.", Icons.Filled.VisibilityOff, null, SettingsPage.Extras),
             HomeEntry("plugins", "Плагины", "Плагины на C++", Icons.Filled.Extension, null, SettingsPage.Plugins),
-            HomeEntry("power", "Энергосбережение", "Экономия заряда", Icons.Filled.BatterySaver, null, SettingsPage.PowerSaving),
             HomeEntry("account", "Аккаунт", "Номер телефона, имя пользователя", Icons.Filled.Person, null, SettingsPage.Account),
-            HomeEntry("privacy", "Конфиденциальность", "Кто видит ваши данные", Icons.Filled.VpnKey, null, SettingsPage.Privacy),
-            HomeEntry("security", "Безопасность", "Пин-код, графический ключ, отпечаток", Icons.Filled.Lock, null, SettingsPage.Security),
+            HomeEntry("security", "Безопасность и конфиденциальность", "Пин-код, отпечаток, кто видит ваши данные", Icons.Filled.Lock, null, SettingsPage.Privacy),
             HomeEntry("devices", "Устройства", "Активные сеансы", Icons.Filled.Laptop, devices, SettingsPage.Devices),
-            HomeEntry("createGroup", "Создать группу", "Новая группа с участниками", Icons.Filled.Group, null, SettingsPage.CreateGroup),
-            HomeEntry("createChannel", "Создать канал", "Публичный или приватный", Icons.Filled.Campaign, null, SettingsPage.CreateChannel),
-            HomeEntry("chatSettings", "Настройки чатов", "Размер текста, анимации", Icons.Filled.ChatBubble, null, SettingsPage.ChatSettings),
-            HomeEntry("folders", "Папки с чатами", "Сортировка чатов по папкам", Icons.Filled.Folder, null, SettingsPage.Folders),
-            HomeEntry("archive", "Архив", "Архивные чаты", Icons.Filled.Archive, null, SettingsPage.Archive),
+            HomeEntry("create", "Создать / Добавить", "Группа, канал, аккаунт", Icons.Filled.Add, null, SettingsPage.CreateHub),
+            HomeEntry("archive", "Архивы", "Архивные чаты", Icons.Filled.Archive, null, SettingsPage.Archive),
             HomeEntry("notifications", "Уведомления", "Звуки, сигналы, бейджи", Icons.Filled.Notifications, null, SettingsPage.Notifications),
-            HomeEntry("data", "Данные и память", "Кэш, автозагрузка медиа", Icons.Filled.PieChart, null, SettingsPage.DataStorage),
-            HomeEntry("language", "Язык", null, Icons.Filled.Language, language, SettingsPage.Language),
+            HomeEntry("system", "Система", "Данные и память, язык, энергосбережение", Icons.Filled.Settings, language, SettingsPage.SystemHub),
             HomeEntry("telegram", "Telegram", "Premium, Звёзды, Бизнес, подарки, помощь", Icons.Filled.Star, null, SettingsPage.TelegramHub),
 )
 
