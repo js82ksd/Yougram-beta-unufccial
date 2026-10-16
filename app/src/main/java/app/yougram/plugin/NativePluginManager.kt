@@ -55,8 +55,11 @@ class NativePluginManager(private val context: Context) {
     private val main = Handler(Looper.getMainLooper())
     @Volatile private var active = false
 
-    private val _plugins = MutableStateFlow<List<InstalledPlugin>>(emptyList())
-    val plugins: StateFlow<List<InstalledPlugin>> = _plugins.asStateFlow()
+private val _plugins = MutableStateFlow<List<InstalledPlugin>>(emptyList())
+val plugins: StateFlow<List<InstalledPlugin>> = _plugins.asStateFlow()
+
+private val _pages = MutableStateFlow<Map<String, PluginPage>>(emptyMap())
+val pages: StateFlow<Map<String, PluginPage>> = _pages.asStateFlow()
 
     private external fun nativeInit()
     private external fun nativeLoad(id: String, path: String): String?
@@ -81,12 +84,37 @@ class NativePluginManager(private val context: Context) {
         .filter { it.enabled && permission in it.manifest.permissions }
         .joinToString(",", prefix = ",", postfix = ",") { it.manifest.id }
 
+    /** Регистрирует страницу настроек плагина. Возвращает текст ошибки или null. */
+    fun setPage(pluginId: String, json: String): String? = runCatching {
+        val page = PluginUiParser.parse(pluginId, json)
+        _pages.value = _pages.value + (pluginId to page)
+        null
+    }.getOrElse { it.message ?: "Ошибка страницы" }
+
+    fun clearPage(pluginId: String) { _pages.value = _pages.value - pluginId }
+
+    /** Событие от UI страницы плагина (click/change). */
+    fun sendUiEvent(
+        pluginId: String,
+        page: String,
+        itemId: String,
+        type: String,
+        value: Any?,
+        values: Map<String, Any>,
+    ) = emitTo(
+        pluginId, "ui_event",
+        linkedMapOf("page" to page, "id" to itemId, "type" to type, "value" to value, "values" to values),
+    )
+        
+
     fun loadAll() = synchronized(lock) {
         api?.stopAll()
         if (hostAvailable) loaded.toList().forEach { nativeUnload(it) }
         loaded.clear()
         errors.clear()
+        _pages.value = emptyMap()
         installBundledExample()
+        
         root.listFiles()?.filter { it.isDirectory }?.forEach { dir ->
             readManifest(dir)?.let { loadOne(dir, it) }
         }
@@ -94,7 +122,10 @@ class NativePluginManager(private val context: Context) {
     }
 
     fun setEnabled(pluginId: String, enabled: Boolean) = synchronized(lock) {
-        if (!enabled) api?.onPluginStopped(pluginId)
+        if (!enabled) {
+            api?.onPluginStopped(pluginId)
+            clearPage(pluginId)
+        }
         setDisabled(pluginId, !enabled)
         val dir = File(root, pluginId)
         if (pluginId !in loaded) {
@@ -107,6 +138,7 @@ class NativePluginManager(private val context: Context) {
 
     fun uninstall(pluginId: String) = synchronized(lock) {
         api?.onPluginStopped(pluginId)
+        clearPage(pluginId)
         if (hostAvailable && pluginId in loaded) nativeUnload(pluginId)
         loaded -= pluginId
         errors.remove(pluginId)
