@@ -59,6 +59,8 @@ private val REQUIRED: Map<String, String?> = mapOf(
     "register_command" to PluginPermission.HOOKS,
     "register_action" to PluginPermission.UI,
     "toast" to PluginPermission.UI,
+    "ui_set_page" to PluginPermission.UI,
+    "storage_get" to null,
     "storage_get" to null,
     "storage_set" to null,
     "storage_delete" to null,
@@ -183,6 +185,11 @@ class PluginApi(
                     .filter { it.isNotEmpty() }
                     .joinToString(": ")
                 main.post { Toast.makeText(context, text, Toast.LENGTH_LONG).show() }
+                true
+            }
+            "ui_set_page" -> {
+                val err = manager.setPage(pid, a.toString())
+                if (err != null) error(err)
                 true
             }
             else -> error("Неизвестный метод: $method")
